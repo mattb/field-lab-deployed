@@ -62,21 +62,35 @@ def read_server_models(base_url):
     except (TimeoutError,ConnectionError) as error:raise RuntimeError('Cannot establish local chat server identity') from error
 
 
-def make_agent():
+def ingest_busy(server):
+    """Managed ingest keeps the GPU until it explicitly reaches a quiet phase."""
+    if not hasattr(server,'get_status'):return False
+    value=server.get_status()
+    return bool(value.get('pending') or value.get('phase') and value['phase'] not in ('ready','stopped','failed','error'))
+
+
+def local_chat_model():
+    """One local model transport shared by shot and interview research agents."""
     import httpx2 as httpx
-    from pydantic_ai import Agent,RunContext,ToolOutput
-    from pydantic_ai import ModelRetry
     from pydantic_ai.models.openai import OpenAIChatModel
     from pydantic_ai.providers.openai import OpenAIProvider
     from pydantic_ai.profiles.openai import OpenAIModelProfile
-    from pydantic_ai.capabilities import PrepareTools
-    from typing import Literal
     async def loopback(request):
         if request.url.host!='127.0.0.1':raise ValueError('Chat inference must stay on this Mac')
-    client=httpx.AsyncClient(trust_env=False,timeout=300,event_hooks={'request':[loopback]})
+    client=httpx.AsyncClient(trust_env=False,timeout=600,event_hooks={'request':[loopback]})
+    # A timed-out local generation can still occupy the GPU. Never silently
+    # duplicate that work through SDK retries; let the operator retry explicitly.
     model=OpenAIChatModel(chat_model_id(),
+        settings={'timeout':600,'max_retries':0},
         provider=OpenAIProvider(base_url=chat_base_url(),api_key='local',http_client=client),
-        profile=OpenAIModelProfile(supports_image_input=True,supports_forced_tool_choice=False))
+        profile=OpenAIModelProfile(supports_image_input=True,supports_forced_tool_choice=False,
+            openai_chat_supports_max_completion_tokens=False))
+    return model,client
+
+def make_agent():
+    from pydantic_ai import Agent,RunContext,ToolOutput,ModelRetry
+    from pydantic_ai.capabilities import PrepareTools
+    model,client=local_chat_model()
     agent=Agent(model,deps_type=FootageTools,output_type=ToolOutput(ChatAnswer,name='answer'),instructions=PROMPT,retries=2,capabilities=[PrepareTools(finish_tools)],
         model_settings={'temperature':0,'max_tokens':2048,'parallel_tool_calls':False,'extra_body':{'enable_thinking':False}},tool_timeout=90)
     agent.instructions(finish_instructions)
@@ -201,7 +215,7 @@ class ChatService:
         return {'session_id':session,'sessions':sessions,'turns':turns}
     def submit(self,prompt,session=None):
         if not isinstance(prompt,str) or not prompt.strip() or len(prompt)>4000:raise ValueError('Enter a question of at most 4000 characters')
-        if hasattr(self.server,'get_status') and self.server.get_status().get('pending'):raise ValueError('Footage is still being indexed; try chat when the ingest finishes')
+        if ingest_busy(self.server):raise ValueError('Footage is still being indexed; try chat when the ingest finishes')
         with self.store() as s,s._transaction():
             if session and not s.db.execute('SELECT 1 FROM chat_sessions WHERE id=?',(session,)).fetchone():raise ValueError('Unknown chat session')
             if session and s.db.execute("SELECT 1 FROM chat_turns WHERE session_id=? AND status='running'",(session,)).fetchone():raise ValueError('This chat already has a running question')
@@ -224,7 +238,8 @@ class ChatService:
         from dit_notes import model_readiness
         if not model_readiness(self.server.tool_root)[CHAT_MODEL]['ready']:
             raise RuntimeError('Qwen3.8-27B is not prepared locally; run the pinned offline preparation before using chat')
-        env={**os.environ,'HF_HUB_OFFLINE':'1','TRANSFORMERS_OFFLINE':'1','OTEL_SDK_DISABLED':'true','TOKENIZERS_PARALLELISM':'false'}
+        env={**os.environ,'HF_HUB_OFFLINE':'1','TRANSFORMERS_OFFLINE':'1','OTEL_SDK_DISABLED':'true','TOKENIZERS_PARALLELISM':'false',
+            'APC_ENABLED':'1','APC_DISK_ENABLED':'0','APC_MEMORY_MAX_GB':'2'}
         (self.server.tool_root/'runtime').mkdir(parents=True,exist_ok=True)
         from contextlib import nullcontext
         with getattr(self,'lock',None) or nullcontext():
