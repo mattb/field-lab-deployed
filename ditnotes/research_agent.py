@@ -145,6 +145,31 @@ def make_collection_agent(model):
     return agent
 
 
+def publication_policy(tools):
+    """Expose live application gates, not inferred user intent or source facts."""
+    available = set(tools.speech)
+    required = getattr(tools, 'minimum_interviews', 2 if tools.requires_diversity else 1)
+    def missing(covered):
+        ids = [tools._alias('interviews', key) for key in sorted(available-set(covered))]
+        return {'count':len(ids), 'recording_ids':ids}
+    unavailable = max(0, len(tools.assets)-len(available))
+    return {
+        'owner':'application_validation',
+        'note':'Current enforcement state, not inferred user intent, scientific support, verified people or proof of exhaustive reading. Other original-source and citation checks still apply.',
+        'minimum_distinct_cited_recordings':required,
+        'corpus_coverage_required_by_application':bool(getattr(tools, 'requires_corpus', False)),
+        'writer_scope_corpus_also_requires_complete_coverage':True,
+        'minimum_distinct_supported_blocks_for_answered':3 if required >= 3 else 1,
+        'available_transcribed_recording_count':len(available),
+        'missing_searched_recordings':missing(tools.searched_interviews),
+        'missing_read_context_recordings':missing(tools.read_interviews),
+        'unavailable_inventory_count':unavailable,
+        'corpus_with_unavailable_inventory_requires_limitations':bool(unavailable),
+        'incomplete_count_or_corpus_coverage_exception':{'outcome':'partial', 'nonempty_limitations_required':True},
+        'not_supported_requires_no_claims_or_sources':True,
+    }
+
+
 def original_dossier(tools, collection_status=None):
     """Group exact already-read rows once; no generated text or unread hits."""
     interviews = []
@@ -153,7 +178,8 @@ def original_dossier(tools, collection_status=None):
         if not selected: continue
         passages = [{key:value for key,value in tools.model_passage(row).items() if key != 'asset_id'} for row in selected]
         interviews.append({'id':tools._alias('interviews', asset_id), 'label':tools._label(tools.assets[asset_id]), 'passages':passages})
-    dossier = {'interviews':interviews, 'coverage':tools.model_coverage(inventory=False),
+    dossier = {'publication_policy':publication_policy(tools),
+        'interviews':interviews, 'coverage':tools.model_coverage(inventory=False),
         'source_note':'Original machine transcripts only. Recording labels do not establish who spoke each sentence. Passage times and streams may be discontinuous; adjacent listed excerpts are not necessarily adjacent dialogue.'}
     dossier['voice_group_note'] = 'voice_groups are request-local aliases of saved, fallible voice groups associated by time with the whole ASR sentence. Multiple groups may reflect successive turns or overlap, possibly another audio stream. Equal or different aliases do not prove equal or different people. They do not establish who said particular words, names or interviewer roles.'
     if collection_status is not None:
@@ -194,6 +220,8 @@ def dossier_for_model(dossier):
     # Put the column legend before the rows it explains, rather than after
     # thousands of tokens of source arrays. This does not change any evidence.
     header = {key:rendered.pop(key) for key in ('dossier_format', 'passage_columns', 'passage_extra_fields') if key in rendered}
+    if 'publication_policy' in rendered:
+        header['publication_policy'] = rendered.pop('publication_policy')
     return json.dumps({**header, **rendered}, ensure_ascii=False, separators=(',', ':'))
 
 

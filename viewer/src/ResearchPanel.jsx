@@ -43,7 +43,7 @@ export function ResearchPanel({projectId,onSelect}){
   {!active&&lastRun&&['error','interrupted'].includes(lastRun.status)&&<p role="alert">{lastRun.error||'Research was interrupted. Retry to start a new answer.'}</p>}
   {answer&&<section className="research-answer">
    <div className="research-answer-toolbar"><h3>Answer</h3>{answer.model&&<small>{answer.model}{Number.isFinite(answer.wall_seconds)?` · ${researchDuration(answer.wall_seconds*1000)}`:''}</small>}{answers.length>1&&<select aria-label="Answer history" value={history} onChange={e=>setHistory(e.target.value)}><option value="">Latest answer</option>{answers.map((a,i)=><option key={a.id} value={a.id}>Answer {i+1}{a.model?` · ${a.model}`:''}{a.created_at?` · ${new Date(researchTimeMs(a.created_at)).toLocaleString()}`:''}</option>)}</select>}</div>
-   {answer.outcome==='partial'&&<p role="status">Partial answer: some requested evidence is missing.</p>}
+   {answer.outcome==='partial'&&<p role="status">Partial answer. See limitations.</p>}
    {answer.outcome==='not_supported'&&<p role="status">A supported answer was not established.</p>}
    {stale&&<p className="research-stale">{dirty?'The question has unsaved changes.':'The question or indexed footage has changed since this answer.'} Ask again for an updated answer.</p>}
    <ChatMarkdown text={answer.answer||''} results={sources} onSelect={selectSource}/>
