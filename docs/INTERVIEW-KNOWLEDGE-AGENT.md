@@ -6,23 +6,53 @@ Status: implemented in the research development branch; real local-model evaluat
 
 Open **Research** in the existing media library. Write a question and choose **Ask**, or **Save** to keep it for later. Notes and follow-up questions are optional. Answers contain playable source links, with expandable claim evidence and source coverage. The original media remains in the shared player. Editing a saved question retains earlier answers as history and marks them stale; a new indexed snapshot also makes an earlier answer stale. Asking again creates another answer rather than overwriting history.
 
-Qwen3.8-27B, 4-bit MLX, handles synthesis. The existing local text embeddings, cross-encoder and native Orama 3.1.18 index supply original transcript evidence. This mode does not use an external inference API or a second vector database. Fast ingest captions continue to use Qwen3.5-4B.
+Qwen3.8-27B, 4-bit MLX, is the default local model for evidence collection and synthesis, using the existing agentic-chat role. The existing local text embeddings, cross-encoder and native Orama 3.1.18 index supply original transcript evidence. Fast ingest captions continue to use Qwen3.5-4B. Research does not use an external inference API or a second vector database. A development run with another local model is an explicit evaluation choice, not a production fallback or evidence of equivalent quality.
 
-Questions, notes, runs and immutable answers live transactionally in the project's existing SQLite store. A question version check prevents competing edits from silently overwriting each other. A research server holds an execution lock, and startup marks unfinished runs interrupted so saved questions can be retried. There is at most one queued or active research job, sharing the ordinary chat executor and model owner. Generated answers are not fed back into the evidence index.
+Questions, notes, follow-ups, run diagnostics and immutable answers live transactionally in the project's existing SQLite store. A question version check prevents competing edits from silently overwriting each other. A research server holds an execution lock, and startup marks unfinished runs interrupted so saved questions can be retried explicitly. There is at most one queued or active research job, sharing the ordinary chat executor and model owner. Generated answers and earlier saved answers are not added to the evidence index or supplied as transcript evidence for the next run. Operator notes guide the question and are labeled as context rather than testimony.
 
-Each run pins a published catalog/vector pair. Saved sources include the source content identity, exact transcript text, timing and snapshot revision. Renames can still play; replaced or missing media cannot silently substitute for the original source. The library shows pending interview counts, and a partial corpus is never described as complete. A server managing an active ingest refuses research execution until that ingest is quiet; development evaluation uses a separate frozen test project and server.
+Each run pins a published catalog/vector pair. Saved sources include the source content identity, exact transcript text, timing and snapshot revision. Renames can still play; replaced or missing media cannot silently substitute for the original source. Coverage distinguishes ready, pending, failed, searched and read sources. Searching a recording or reading an opening does not establish that its entire transcript was reviewed.
 
-Research progress shows elapsed time and actual model context/decode counters when the local model emits them. These are progress measurements, not a promised completion percentage or ETA for the whole investigation. Model evidence packets omit repeated provenance already retained in storage. Native MLX prefix caching is enabled with a 2 GiB memory limit and disk caching disabled; actual reuse and latency must be measured on the target Mac. The model is released after the investigation finishes.
+Ingest has priority. A server managing an active ingest refuses a new research run while retaining the question. If ingest starts during research, a guard interrupts the investigation and stops only the model process owned by the chat service. Retry the saved question when ingest is quiet; interrupted investigations do not automatically resume. An independently started model server remains under the operator's control. Development evaluation must use a separate disposable project/server rather than mutate a live ingest.
 
-The sections below describe the implemented evidence strategy and optional future enrichment. The current implementation retrieves existing speech records and reads their neighboring context; it does not yet generate section maps, derived interview overviews or automatic follow-up updates.
+Research progress shows elapsed time, collection/writing stages and actual model context/decode counters when the local model emits them. These measurements do not provide a completion percentage or whole-investigation ETA. Native MLX prefix caching is enabled with a 2 GiB memory limit and disk caching disabled; actual reuse, memory requirements and latency must be measured on the target Mac. The app releases the model it owns after the investigation finishes.
 
-## Recommendation
+## Current two-phase investigation
 
-Extend the existing local chat with an interview-research mode. Reuse Orama 3.1.18 for retrieval, the existing MLX text embeddings and reranker, PydanticAI for tool orchestration, and Qwen3.8-27B for synthesis. No new vector database or search framework is needed. Start with original transcript evidence; add a resumable, optional text-only enrichment pass after that works.
+1. **Collect original evidence.** A bounded collector receives the question and pinned interview inventory. It can read interview openings, search original transcripts and read surrounding exchanges. Searches include bounded neighboring original context; comparisons can also search up to three other already-opened recordings for cross-check candidates. These candidates are not independent agreement or proof of absence. Evidence reads execute sequentially. A run admits at most 12,000 unique original words or 800 passages; rereads are free, and a request is admitted completely or refused explicitly without truncating testimony. This is a processing bound, not evidence of absence. The collector has at most six model requests and 24 tool calls, and is instructed to stop reformulating an unresolved subquestion after two attempts.
+2. **Build the original dossier.** The application groups exact passages recorded in the read ledger by interview, with source references, audio stream, start/end times, available speaker labels and coverage. The dossier records whether collection returned normally, exhausted its budget or encountered a model-output error. This is application status, not a finding about the evidence. Unread search hits, collector prose and collector conclusions are excluded. Repeated provenance is retained in canonical storage rather than repeated in every model packet. Passage limits can omit context; the collector can request additional specific passages. Listed excerpts can be discontinuous; their order alone does not establish an exchange between speakers.
+3. **Write from that dossier.** A separate writer invocation receives the question and original evidence only. It has no retrieval tools. It returns a synthesis, separate evidence-linked claims, limitations and useful follow-ups. The writer uses PydanticAI native JSON-schema output, constrained by the installed MLX server and llguidance, with bounded answer fields and lists. It uses short request-local citation markers; the application resolves these to canonical sources and derives playable links and source cards from the claims. The writer phase permits at most three model requests, including validation retries. The two phases share a 12-minute investigation limit; reaching a limit does not establish that relevant evidence is absent.
 
-The useful product is a research assistant that can compare accounts, find explanations, assemble sourced interview briefs, and maintain a list of unanswered questions. Shot search remains available in the same application. Research answers need their own text-evidence validation rather than the current requirement for visually inspected matching shots.
+The phases reuse PydanticAI and the same local chat model. This separation prevents a collector's generated summary from becoming the writer's evidence. It does not guarantee that the collector found every relevant exchange or that the writer interpreted it correctly.
 
-## Two levels of evidence
+## Grounding checks and quality limits
+
+The application checks that supported claims cite original passages retrieved and read in this run, that each declared exact quote occurs within one cited original chunk, and that source cards match the union of claim citations. Quotes cannot be assembled by joining chunks. Model validation limits publication to 40 unique source passages, matching playback publication's bound. Answer prose must include playable citations covering every interview used by its claims. A supported comparison requiring at least three interviews also needs at least three distinct claims. Corpus-scoped answers require searching and reading context from every available transcribed recording, or a qualified partial outcome. Pending interviews must remain visible as a coverage limit.
+
+These are reference, presentation and coverage checks. They do not prove that a paraphrase follows from its citation, a comparison makes the right connection, an inferred speaker is correct, or an answer is useful. A claim can pass structural validation while exaggerating certainty, conflating habitats or omitting a crucial qualification. Independent semantic evaluation against the original surrounding exchanges remains necessary; successful tool calls or valid IDs are not a quality score.
+
+The source-count gate does not resolve names in a question into a required set of recordings. Reading a cohort of interview openings helps route collection, but does not mechanically guarantee that every named source is represented in the final answer. Check the actual source coverage for the requested recordings.
+
+Recording labels identify source files, not the speaker of every sentence. A single recognized sentence can combine a question and an answer. Unknown or overlapping speakers remain unresolved; interviewer suggestions are not testimony. Plans and hopes are not completed outcomes, and differences between places or conditions are not automatically contradictions. Machine transcripts and their quotations are not audio-verified. Long sentence chunks share sentence timing, so playback may begin before the quoted words.
+
+The writer can return `answered`, `partial` or `not_supported`. A failed validation or exhausted writer budget can produce a conservative inability-to-finish response; it must not be interpreted as a finding that the corpus lacks evidence. Research is not yet validated for deployment to the field installation, and no response-time or semantic pass rate is promised here.
+
+## Collector tools and playback
+
+The collector has four tools: `read_interview_openings(interview_ids)`, `search_interviews(query, interview_ids?, sources_per_interview?)`, `read_passages(ids, surrounding_context?)` and `interview_coverage()`. They use request-local references that the application maps back to canonical source identities. Search and read tools return original transcript text, not generated enrichment. Source playback is derived by the application after validation; the writer does not call `open_sources` or construct its own URLs.
+
+Research has its own answer structure with claim evidence and coverage alongside shot search. It does not require visually matching shots or a three-sentence answer limit. The operator sees a sourced answer, playable citations and expandable coverage rather than retrieval internals.
+
+## Extending the persistent question board
+
+The current board already saves questions, notes, follow-ups and immutable answer history. Editing a question or changing the snapshot can make an old answer stale; they do not automatically trigger another investigation. A future extension could update relevant evidence and propose new follow-ups when field interviews arrive. With explicit preproduction/field dates, this can compare an earlier expectation with a later experience without overwriting either account. Suggested editorial connections remain proposals, visibly separate from what participants actually said.
+
+This provides practical outputs: an interview brief, a comparison of complementary voices, a sourced story outline, or questions to ask tomorrow. It does not require a graph database. Ordinary source-ID relationships and the existing SQLite store are sufficient initially.
+
+## Optional future enrichment
+
+The implementation currently retrieves existing speech records and original neighboring context. It does not generate section maps, derived interview overviews, automatic question-board refreshes or evidence updates when new interviews arrive. The design notes below describe optional extensions; they are not additional implemented ingestion work.
+
+### Two levels of evidence
 
 | Level | Contents | Purpose |
 | --- | --- | --- |
@@ -33,7 +63,7 @@ Use the same Orama text index and model space for both. Distinguish record types
 
 Original records should have stable references based on source content, stream, transcript revision and token/span identity. Carry both start and end times. Editing a transcript should invalidate affected derived records and their vectors while preserving the original machine transcript and operator audit history.
 
-## Start directly from transcripts
+### Start directly from transcripts
 
 The current search projection creates speech documents from sentences, splitting long sentences into 85-word pieces. This supports pinpoint retrieval, but short sentences often omit what a pronoun or a reply refers to. Long sentence splits also share the original sentence's time range, so a chunk start is not necessarily a word-accurate quote start.
 
@@ -41,7 +71,7 @@ Build small, speaker-aware retrieval passages around adjacent utterances. Keep e
 
 Preserve the interviewer's question as context while distinguishing it from the interviewee's answer. A question about an experience is not evidence that the interviewee had that experience. Ambiguous speaker overlaps stay ambiguous. A folder title can suggest an interview subject; it cannot establish who spoke every sentence. Reuse saved, reviewed voice identities and permit unknown speakers.
 
-## Optional preprocessing
+### Optional preprocessing
 
 Once raw retrieval is useful, run a separate local text-only job to propose:
 
@@ -53,13 +83,13 @@ These records are explicitly machine-derived. Validate span references and exact
 
 Use the existing 27B reasoning role for this optional pass; keep it outside the ingest critical path. It needs its own measured time and memory budget. Start with one overview pass per interview and only introduce more expensive extraction if an evaluation demonstrates a benefit. Do not add another heavy model job alongside an already busy ingest merely to populate research summaries.
 
-## Retrieval and answering
+### Retrieval and answering
 
 For a focused question:
 
 1. Search transcript passages with Orama's native lexical + vector hybrid search. Exact names, acronyms and scientific terms need lexical retrieval; paraphrases need vectors. Search concise subquestions separately when useful.
 2. Rerank bounded candidate batches with the existing local cross-encoder. Merge overlapping passages and fetch neighboring turns or the parent answer. Keep the quality gate independent of relative Orama ranking.
-3. Give Qwen a compact evidence bundle containing source IDs, speaker attribution and uncertainty, exact text and times. Generate an answer whose material claims cite those spans.
+3. Build the original dossier from the read ledger and give it to the separate writer. Any future derived records should route retrieval rather than replace the cited original spans.
 4. Validate citation IDs, quote substrings and media ranges; open citations in the existing player. Semantic support still needs evaluation—valid IDs alone do not make an answer correct.
 
 For cross-interview comparisons, add source diversity. Group candidates by a scalar string `interviewId` and take a bounded number per interview before final selection, or issue native filtered searches per interview. In 3.1.18 `groupBy` accepts string/number/boolean fields, **not** our current enum `assetId`; do not assume the existing schema works unchanged. Reranking should not let one verbose interview occupy the whole context.
@@ -68,26 +98,7 @@ For broad questions such as “what themes recur across the interviews?”, top-
 
 Counts must be calculated from distinct sources or reviewed people, not passage counts. Repeated interviewer questions and duplicate media do not represent independent agreement. A facet shows matching indexed records, not scientific consensus. Differences may concern different places, conditions or time periods rather than a genuine contradiction; show both accounts with those qualifications.
 
-## Agent and UI
-
-Reuse the current framework and citation/player controls. Add a research answer structure with claim-to-evidence references and coverage, alongside the existing shot answer structure. Do not force a knowledge answer into `VisualEvidence`, “matching shot” failures, or a three-sentence answer limit.
-
-The main tool contracts can stay small:
-
-- `search_interviews(query, interview_ids?, sources_per_interview?)`: native Orama retrieval plus existing reranking, restricted to transcript/research records.
-- `read_passages(ids, surrounding_context?)`: original text, questions/answers, attribution and source times.
-- `interview_coverage()`: completed, pending, failed and searched sources at a pinned snapshot.
-- `open_sources(ids)`: existing local playback links, using retrieved source IDs.
-
-These are additions to the current tools, not a new agent framework. Keep the browser UI minimal: a sourced answer, playable citations, and expandable coverage. The operator should not manage chunks, vectors, CSVs or generated metadata.
-
-## A useful extension: a living question board
-
-For each research question, retain the best cited answers, differing accounts, uncertainties and proposed follow-ups. Let the operator save or edit a question in the existing metadata store. When new field interviews arrive, update relevant evidence and suggest follow-ups. With explicit preproduction/field dates, this can compare an earlier expectation with a later experience without overwriting either account. Suggested editorial connections remain proposals, visibly separate from what participants actually said.
-
-This provides practical outputs: an interview brief, a comparison of complementary voices, a sourced story outline, or questions to ask tomorrow. It does not require a graph database. Ordinary source-ID relationships and the existing SQLite store are sufficient initially.
-
-## Persistence and live ingest
+### Persistence and live ingest
 
 Read only sealed published catalog/transcript generations. Each answer records the snapshot revision and coverage it used. The next question may see a newer snapshot; an in-flight answer should not silently combine generations.
 

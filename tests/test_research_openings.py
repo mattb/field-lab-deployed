@@ -30,7 +30,11 @@ class ResearchOpeningTests(unittest.TestCase):
             canonical = aliases[row['id']]
             self.assertEqual(canonical, f'one:speech:{i}')
             self.assertEqual(row['text'], tools.by_id[canonical]['text'])
-            self.assertEqual((row['seconds'], row['end']), (i*10, i*10+9))
+            self.assertEqual(row['seconds'], i*10)
+            self.assertEqual(row['end'], i*10+9)
+            self.assertIn('stream', row)
+            self.assertNotIn('interview_label', row)
+            self.assertEqual(tools.compact(tools.by_id[canonical])['end'], i*10+9)
         self.assertLessEqual(sum(len(row['text'].split()) for row in result['passages']), 450)
         self.assertEqual(tools.read_interviews, {'one'})
         self.assertEqual(tools.searched_interviews, set())

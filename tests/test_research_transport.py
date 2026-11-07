@@ -22,9 +22,7 @@ class ResearchTransportTests(unittest.IsolatedAsyncioTestCase):
                        'claims': [], 'result_ids': []}
             return httpx2.Response(200, json={
                 'id': 'cpu-test', 'object': 'chat.completion', 'created': 1, 'model': 'local',
-                'choices': [{'index': 0, 'message': {'role': 'assistant', 'content': None,
-                    'tool_calls': [{'id': 'answer-1', 'type': 'function', 'function': {
-                        'name': 'answer', 'arguments': json.dumps(payload)}}]}, 'finish_reason': 'tool_calls'}],
+                'choices': [{'index': 0, 'message': {'role': 'assistant', 'content': json.dumps(payload)}, 'finish_reason': 'stop'}],
                 'usage': {'prompt_tokens': 1, 'completion_tokens': 1, 'total_tokens': 2}})
 
         test = self
@@ -53,8 +51,15 @@ class ResearchTransportTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('max_completion_tokens', body)
         self.assertFalse(body['enable_thinking'])
         self.assertEqual(request.extensions['timeout']['read'], 600)
-        answer_tool = next(tool['function'] for tool in body['tools'] if tool['function']['name'] == 'answer')
-        self.assertNotIn('result_ids', answer_tool['parameters']['properties'])
+        self.assertFalse(body.get('tools'))
+        self.assertEqual(body['response_format']['type'], 'json_schema')
+        schema = body['response_format']['json_schema']['schema']
+        self.assertNotIn('result_ids', schema['properties'])
+        self.assertEqual(schema['properties']['claims']['maxItems'], 10)
+        self.assertEqual(schema['properties']['limitations']['maxItems'], 4)
+        self.assertEqual(schema['properties']['followups']['maxItems'], 4)
+        self.assertEqual(schema['properties']['limitations']['items']['maxLength'], 400)
+        self.assertEqual(schema['$defs']['WriterResearchClaim']['properties']['quotes']['items']['maxLength'], 600)
 
     async def test_failed_local_generation_has_no_hidden_sdk_retry(self):
         from pydantic_ai.exceptions import ModelHTTPError
@@ -91,6 +96,21 @@ class ResearchTransportTests(unittest.IsolatedAsyncioTestCase):
             finally:
                 await client.aclose()
         transport.assert_not_called()
+
+    async def test_native_profile_is_scoped_to_writer_and_reuses_shared_transport(self):
+        base, client = local_chat_model()
+        base.profile['supports_json_schema_output'] = False
+        with patch('ditnotes.research_agent.local_chat_model', return_value=(base, client)):
+            writer, returned = make_research_agent()
+        try:
+            self.assertIs(returned, client)
+            self.assertIsNot(writer.model, base)
+            self.assertFalse(base.profile['supports_json_schema_output'])
+            self.assertTrue(writer.model.profile['supports_json_schema_output'])
+            self.assertIs(writer.model.provider, base.provider)
+            self.assertEqual(writer.model.settings, base.settings)
+        finally:
+            await client.aclose()
 
 
 class ResearchProgressTests(unittest.TestCase):

@@ -5,11 +5,13 @@ Field Lab has two Qwen roles. They share the existing local search tools and evi
 | Work | Model |
 | --- | --- |
 | Automatic visual notes during ingest/reindex | Qwen3.5-4B, 4-bit MLX |
-| Agentic chat planning, tool use, image inspection and answers | Qwen3.8-27B, 4-bit MLX |
+| Agentic chat and interview research: planning, collection, image inspection and synthesis | Qwen3.8-27B, 4-bit MLX |
 | Complete audio transcripts | Parakeet TDT |
 | Face/voice identities, text/CLIP embeddings and reranking | The existing specialized local models |
 
 The 4B vision model keeps the routine ingest path bounded. Non-ingest Qwen reasoning uses the 27B chat model; chat must not silently fall back to 4B. Both run locally. The larger model can still make mistakes: named-person queries use operator labels and identity evidence, inspected candidate frames must satisfy every requested condition, and an unverified search publishes no matching shots.
+
+Interview research uses two bounded invocations of this same default 27B role: an evidence collector, then a writer with an original-transcript dossier and no retrieval tools. It does not require a third model. Explicit development comparisons with another local checkpoint do not change the production role or establish equivalent quality. See [research behavior and limits](INTERVIEW-KNOWLEDGE-AGENT.md). Source-reference checks and model loading checks do not establish the semantic accuracy of a synthesis.
 
 The current face stack is **YuNet 2023mar detection + SFace 2021dec recognition**, through OpenCV DNN on CPU. SFace produces 128-dimensional normalized identity vectors; it does not run through MLX or Qwen. See the [MLX-oriented replacement research](FACE-EMBEDDINGS.md) for candidates and the checks required before preserving labels through a model migration.
 

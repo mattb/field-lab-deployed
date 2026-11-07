@@ -67,7 +67,13 @@ chosen-drive/Ingests/
   _DIT_NOTES/                 # AI objects, catalog, index and project.sqlite3
 ```
 
-The durable project database contains operator names, notes, identity review, links and chat. Preserve `_DIT_NOTES` with the media. Back up application `shared/` separately so transfer evidence and pending jobs survive a laptop replacement. Neither location belongs in GitHub.
+The durable project database contains operator names, notes, identity review, links, chat and the research question board with answer history. Preserve `_DIT_NOTES` with the media. Back up application `shared/` separately so transfer evidence and pending jobs survive a laptop replacement. Neither location belongs in GitHub.
+
+## Research and ingest priority
+
+In the research development branch, the library's **Research** view saves questions, notes, follow-ups and earlier answers in the project database. Editing a question or publishing a new snapshot marks prior answers stale while preserving their original evidence. Research pins a published snapshot; pending interviews are outside that run's available evidence. See [research behavior and limitations](INTERVIEW-KNOWLEDGE-AGENT.md).
+
+Run research when ingest is quiet. The server refuses a new research job during active ingest, and interrupts an investigation if ingest begins. The question remains saved for an explicit retry; no automatic continuation is promised. Only the app's owned model process is stopped, and it is released after a finished run. Do not treat a completed or structurally validated research answer as proof of semantic correctness or as an ingest/backup verification.
 
 ## Preparation and activation
 

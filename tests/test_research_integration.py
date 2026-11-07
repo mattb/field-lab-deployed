@@ -1,11 +1,12 @@
 """Failure and ownership checks using disposable projects and no ML inference."""
+import asyncio
 from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
 import tempfile
 import threading
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 from ditnotes.research_api import ResearchService
 from ditnotes.research_store import ResearchBoard
@@ -72,6 +73,75 @@ class ResearchIntegrationTests(unittest.TestCase):
                 service.submit('q', 1)
             tools.assert_not_called()
             chat.assert_not_called()
+
+    def test_ingest_start_during_model_startup_stops_only_owned_late_process_and_preserves_retry(self):
+        service = self.service()
+        self.server.tool_root = self.project
+        status = {'phase': 'ready', 'pending': 0}
+        self.server.get_status = lambda: dict(status)
+        self.server.stop_ingest = Mock(side_effect=AssertionError('Never stop ingest'))
+        self.server.shutdown = Mock(side_effect=AssertionError('Never stop the library server'))
+        first_stop = threading.Event()
+        process = {'owned': False, 'late_stopped': False}
+        def stop_owned():
+            if process['owned']:
+                process['owned'] = False
+                process['late_stopped'] = True
+            first_stop.set()
+        def ensure():
+            status['phase'] = 'processing'
+            self.assertTrue(first_stop.wait(4), 'Monitor should notice ingest during ensure_model')
+            # Simulate a model that appears after the first stop saw no handle.
+            process['owned'] = True
+        chat = SimpleNamespace(ensure_model=Mock(side_effect=ensure), stop_owned_model=Mock(side_effect=stop_owned),
+                               closing=threading.Event(), stop_unowned_model=Mock())
+        tools = SimpleNamespace(close=Mock(), configure_request=Mock(), snapshot_revision='pinned-source')
+        with self.board() as board:
+            question = board.create('Keep this question', notes='Operator notes survive', followups=['Follow this up'])
+            run = board.start_run(question['id'], 1, 'pinned-source')
+        with patch('ditnotes.research_agent.run_research_agent', new_callable=AsyncMock) as agent:
+            service.run(run, tools, chat)
+            agent.assert_not_awaited()
+        self.assertTrue(process['late_stopped'])
+        self.assertFalse(process['owned'])
+        self.assertEqual(status['phase'], 'processing')
+        self.server.stop_ingest.assert_not_called()
+        self.server.shutdown.assert_not_called()
+        chat.stop_unowned_model.assert_not_called()
+        tools.close.assert_called_once()
+        with self.board() as board:
+            saved = board.get(question['id'])
+            self.assertEqual(saved['notes'], 'Operator notes survive')
+            self.assertEqual(saved['followups'], ['Follow this up'])
+            self.assertEqual(saved['answers'], [])
+            self.assertEqual(board.runs()[0]['status'], 'interrupted')
+            self.assertIn('Ingest started; question saved; retry when quiet', board.runs()[0]['error'])
+            self.assertEqual(board.runs()[0]['snapshot_revision'], 'pinned-source')
+        with self.assertRaisesRegex(ValueError, 'ingest'):
+            service.submit(question['id'], 1)
+
+    def test_ingest_start_during_active_research_prevents_answer_publication(self):
+        from ditnotes.research import ResearchAnswer
+        service = self.service()
+        self.server.tool_root = self.project
+        status = {'phase': 'ready', 'pending': 0}
+        self.server.get_status = lambda: dict(status)
+        stopped = threading.Event()
+        chat = SimpleNamespace(ensure_model=Mock(), stop_owned_model=Mock(side_effect=stopped.set), closing=threading.Event())
+        tools = SimpleNamespace(close=Mock(), configure_request=Mock(), snapshot_revision='pinned-source')
+        with self.board() as board:
+            question = board.create('Saved question')
+            run = board.start_run(question['id'], 1, 'pinned-source')
+        async def research(*_):
+            status['phase'] = 'processing'
+            self.assertTrue(await asyncio.to_thread(stopped.wait, 4))
+            return ResearchAnswer(outcome='not_supported', answer='Late result must not publish.'), '[]'
+        with patch('ditnotes.research_agent.run_research_agent', side_effect=research):
+            service.run(run, tools, chat)
+        with self.board() as board:
+            self.assertEqual(board.runs()[0]['status'], 'interrupted')
+            self.assertEqual(board.get(question['id'])['answers'], [])
+        tools.close.assert_called_once()
 
     def test_queue_failure_durably_interrupts_run_and_closes_tools(self):
         service = self.service()

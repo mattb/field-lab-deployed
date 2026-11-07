@@ -96,8 +96,10 @@ class EvidenceTests(unittest.TestCase):
         value = t.interview_coverage()
         self.assertEqual((value['ready'], value['total'], value['pending']), (2, 3, 1))
         self.assertEqual(value['read_interview_ids'], [])
+        inventory = {r['id']: r['label'] for r in t.model_coverage()['interviews']}
         row = t.read_passages(['one:speech:0'], 0)['passages'][0]
-        self.assertEqual(row['interview_label'], 'Interview One')
+        self.assertEqual(inventory[row['asset_id']], 'Interview One')
+        self.assertNotIn('interview_label', row)
         self.assertNotIn('speaker_name', row)
         self.assertNotIn('attribution_note', row)
 
@@ -109,6 +111,8 @@ class EvidenceTests(unittest.TestCase):
         self.assertEqual([aliases[r['id']] for r in value['passages']], ['one:speech:0', 'one:speech:1', 'one:speech:2'])
         self.assertEqual(value['passages'][1]['seconds'], 10)
         self.assertEqual(value['passages'][1]['end'], 19)
+        self.assertIn('stream', value['passages'][1])
+        self.assertEqual(t.compact(t.by_id[aliases[value['passages'][1]['id']]])['end'], 19)
         self.assertNotIn('two:speech:0', t.read_ids)
 
     def test_unread_or_unknown_sources_cannot_support_claims(self):

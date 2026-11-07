@@ -8,6 +8,8 @@ OffShoot retains complete cards and verifies each copy. Field Lab queues verifie
 
 Qwen3.5-4B handles fast ingest visual notes; Qwen3.8-27B handles agentic chat, tool planning and image inspection. Parakeet, both Qwen models, embeddings and reranking run locally using MLX; face detection/embedding uses OpenCV. Text and image retrieval share the Orama architecture. No cloud inference key is required. Model weights are downloaded from pinned upstream revisions and checked; **no footage, weights, saved chats, identities or project metadata are included here**. Third-party model and dependency licenses remain their own. See [model roles and offline preparation](docs/MODELS.md).
 
+The development branch also includes [cross-interview research](docs/INTERVIEW-KNOWLEDGE-AGENT.md): a persistent question board with source-linked answers from local transcript evidence. Research uses the default 27B chat role for bounded evidence collection and a separate writer invocation, and yields to ingest. Semantic evaluation and field deployment validation remain in progress.
+
 This is an early deployment release. Supported target: **Apple Silicon, macOS 27+, Xcode Command Line Tools**, OffShoot Pro 26.3+. First installation requires internet and enough space for models, caches, dependencies and source builds; allow at least 65 GB free. Older operating systems have not been validated. OffShoot/CCC licenses are purchased separately. CCC is configured separately after explicitly choosing the second drive.
 
 ## Install with Codex

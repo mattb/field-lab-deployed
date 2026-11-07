@@ -130,18 +130,71 @@ class ResearchModelOutputTests(unittest.TestCase):
         hit = tools.model_passage(tools.by_id['one:speech:0'])['id']
         quote = tools.by_id['one:speech:1']['text']
         answer = ResearchAnswer(outcome='answered', answer='Evidence.',
-            claims=[ResearchClaim(text='A claim.', evidence_ids=[hit], quotes=[quote])])
+            claims=[ResearchClaim(text='A claim.', evidence_ids=[hit], quotes=[quote,'A second missing quotation.'])])
         with self.assertRaises(ValueError) as caught:
             tools.validate_model_answer(answer)
         message = str(caught.exception)
         self.assertIn('"quote_excerpt": "'+quote+'"', message)
         self.assertIn('"cited_passage_ids": ["'+hit+'"]', message)
         self.assertIn('"exact_match_already_read_passage_ids": ["'+correct+'"]', message)
+        self.assertIn('A second missing quotation.',message)
         self.assertNotIn('two:speech:1', tools.provenance_aliases()['evidence'].values())
         answer.claims[0].quotes = ['x'*1000]
         with self.assertRaises(ValueError) as caught:
             tools.validate_model_answer(answer)
         self.assertLess(len(str(caught.exception)), 650)
+
+    def test_limitations_and_followups_compile_claimed_markers_preserving_code_and_escapes(self):
+        tools = self.tools()
+        answer = self.answer(tools)
+        one = tools.model_passage(tools.by_id['one:speech:0'])['id']
+        two = tools.model_passage(tools.by_id['two:speech:0'])['id']
+        answer.limitations = [f'Limited account [{one}]. Code `[{one}]` and escaped \\[{two}].']
+        answer.followups = [f'Clarify the relationship ({one},{two}).']
+        tools.validate_model_answer(answer)
+        self.assertIn('#shot=one:speech:0&t=0.0', unquote(answer.limitations[0]))
+        self.assertIn(f'`[{one}]`', answer.limitations[0])
+        self.assertIn(f'\\[{two}]', answer.limitations[0])
+        self.assertIn('#shot=two:speech:0&t=0.0', unquote(answer.followups[0]))
+        previous = answer.model_dump()
+        tools.validate_model_answer(answer)
+        self.assertEqual(answer.model_dump(), previous)
+
+    def test_bad_tail_markers_do_not_partially_normalize_or_derive_result_selection(self):
+        for field in ('limitations', 'followups'):
+            for kind in ('unknown', 'unread', 'unclaimed'):
+                with self.subTest(field=field, kind=kind):
+                    tools = self.tools()
+                    answer = self.answer(tools)
+                    if kind == 'unknown': bad = 'e999999'
+                    else:
+                        if kind == 'unclaimed': tools.read_passages(['one:speech:1'], 0)
+                        bad = tools.model_passage(tools.by_id['one:speech:1'])['id']
+                    setattr(answer, field, [f'Invalid source [{bad}].'])
+                    answer.result_ids = ['untouched-unused-selection']
+                    previous = answer.model_dump()
+                    with self.assertRaisesRegex(ValueError, 'ungrounded'):
+                        tools.validate_model_answer(answer)
+                    self.assertEqual(answer.model_dump(), previous)
+
+    def test_late_quote_and_presentation_failure_leave_answer_unchanged(self):
+        for gate in ('quote', 'presentation'):
+            with self.subTest(gate=gate):
+                tools = self.tools()
+                answer = self.answer(tools)
+                if gate == 'quote': answer.claims[0].quotes = ['An invented quote.']
+                else: answer.claims = [ResearchClaim(text='One omnibus claim.', evidence_ids=answer.result_ids)]
+                previous = answer.model_dump()
+                with self.assertRaises(ValueError): tools.validate_model_answer(answer)
+                self.assertEqual(answer.model_dump(), previous)
+
+    def test_basic_validation_failure_is_atomic_too(self):
+        tools = self.tools()
+        answer = self.answer(tools)
+        answer.claims[0].quotes = ['An invented quote.']
+        previous = answer.model_dump()
+        with self.assertRaises(ValueError): tools.validate_answer(answer)
+        self.assertEqual(answer.model_dump(), previous)
 
 
 if __name__ == '__main__':

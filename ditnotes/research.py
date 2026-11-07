@@ -103,6 +103,9 @@ def catalog_coverage(catalog, snapshot_revision=None):
 
 
 class ResearchTools(FootageTools):
+    MAX_READ_WORDS = 12000
+    MAX_READ_PASSAGES = 800
+
     def __init__(self, server, notify=lambda *_: None):
         self.server = server
         self.notify = notify
@@ -110,7 +113,7 @@ class ResearchTools(FootageTools):
         self.shown = []
         self.lock = threading.Lock()
         self._alias_lock = threading.RLock()
-        self._alias_lock = threading.RLock()
+        self._read_ledger_lock = threading.RLock()
         self.node = None
         self.evidence_checks = 0
         self.searched_interviews = set()
@@ -186,13 +189,16 @@ class ResearchTools(FootageTools):
         for rows in self.speech.values():
             for row in rows[:2]: self.pool.setdefault(row['id'], row)
         self.evidence_checks += 1
-        value.update(searched_interview_ids=sorted(self.searched_interviews), read_interview_ids=sorted(self.read_interviews))
+        value.update(searched_interview_ids=sorted(self.searched_interviews), read_interview_ids=sorted(self.read_interviews),
+            read_passage_ids=sorted(self.read_ids),read_passages=len(self.read_ids),available_passages=len(self.by_id))
+        value['read_budget'] = self.read_budget()
         return value
 
     def model_coverage(self, inventory=True):
         """Lean tool context; full immutable provenance stays in saved results."""
         value = self.interview_coverage()
-        result = {key: value[key] for key in ('ready', 'total', 'pending', 'failed', 'searched_interview_ids', 'read_interview_ids')}
+        result = {key: value[key] for key in ('ready', 'total', 'pending', 'failed', 'searched_interview_ids', 'read_interview_ids','read_passages','available_passages')}
+        result['read_budget'] = value['read_budget']
         for key in ('searched_interview_ids', 'read_interview_ids'):
             result[key] = [self._alias('interviews', source) for source in result[key]]
         if inventory:
@@ -267,8 +273,12 @@ class ResearchTools(FootageTools):
             ids = [self._source_id('evidence', key) for key in claim.evidence_ids]
             claims.append((claim, ids, links(claim.text, set(ids))))
         text = links(answer.answer, set(result_ids))
+        limitations = [links(text, set(result_ids)) for text in answer.limitations]
+        followups = [links(text, set(result_ids)) for text in answer.followups]
         answer.result_ids = result_ids
         answer.answer = text
+        answer.limitations = limitations
+        answer.followups = followups
         for claim, ids, text in claims:
             claim.evidence_ids = ids
             claim.text = text
@@ -277,46 +287,97 @@ class ResearchTools(FootageTools):
     def model_passage(self, row):
         # Never shorten the source text: save tokens by removing repeated
         # provenance, not by silently dropping testimony or its qualifications.
-        value = {'id': self._alias('evidence', row['id']), 'asset_id': self._alias('interviews', row['assetId']), 'interview_label': self._label(self.assets[row['assetId']]),
-                 'seconds': row.get('seconds', 0), 'end': row.get('end', row.get('seconds', 0)), 'text': row['text']}
+        # Recording labels are already mapped once in model_coverage. Stream and
+        # end times stay visible so separate excerpts cannot imply one exchange.
+        value = {'id': self._alias('evidence', row['id']), 'asset_id': self._alias('interviews', row['assetId']),
+                 'seconds': row.get('seconds', 0), 'end': row.get('end', row.get('seconds', 0)),
+                 'stream': row.get('stream'), 'text': row['text']}
         if row.get('personNames') and len(row.get('speakerIds', [])) == len(row['personNames']) == 1:
             value['speaker_name'] = row['personNames'][0]
         return value
 
-    def search_interviews(self, query, interview_ids=None, sources_per_interview=2):
+    def search_interviews(self, query, interview_ids=None, sources_per_interview=2, cohort_cross_check=False, read_context=False):
         if not isinstance(query, str) or not query.strip() or len(query) > 500:
             raise ValueError('Use a concise research search query')
         if isinstance(sources_per_interview, bool) or not isinstance(sources_per_interview, int) or not 1 <= sources_per_interview <= 4:
             raise ValueError('Return one to four sources per interview')
         if interview_ids is not None and not isinstance(interview_ids, list):
             raise ValueError('Choose published interviews with transcripts')
+        if not isinstance(cohort_cross_check, bool):
+            raise ValueError('Cohort cross-check must be enabled explicitly')
+        if not isinstance(read_context, bool):
+            raise ValueError('Context reading must be enabled explicitly')
         ids = list(self.speech) if interview_ids is None else list(dict.fromkeys(self._source_id('interviews', key) for key in interview_ids))
         if not ids or any(not isinstance(i, str) or i not in self.speech for i in ids):
             raise ValueError('Choose published interviews with transcripts')
-        self.notify('Searching interviews', {'query': query, 'interviews': len(ids)})
+        # Opt-in spike: lateral candidates stay within explicitly opened context,
+        # never a new corpus, model, index, or an implied independent testimony.
+        cross_ids = [key for key in self.speech if key not in ids and key in getattr(self, '_opening_cohort', set())][:3] \
+            if cohort_cross_check and self.requires_diversity else []
+        searched = ids+cross_ids
+        self.notify('Searching interviews', {'query': query, 'interviews': len(searched)})
         vector = self.infer('embed_text', [query])['vectors'][0]
-        packet = self.call(action='research_search', query=query, asset_ids=ids, vector=vector,
+        packet = self.call(action='research_search', query=query, asset_ids=searched, vector=vector,
                            per_interview=min(12, sources_per_interview*3))
         candidates = [r for r in packet['rows'] if r.get('id') in self.by_id]
-        self.searched_interviews.update(ids)
+        self.searched_interviews.update(searched)
         self.evidence_checks += 1
         scores = self.infer('rerank', [r['text'] for r in candidates], query)['scores'] if candidates else []
         if len(scores) != len(candidates):
             raise ValueError('Reranker returned an incorrect score count')
-        groups = {i: [] for i in ids}
+        groups = {i: [] for i in searched}
         for row, score in zip(candidates, scores):
             if not isinstance(score, (int, float)) or not math.isfinite(score):
                 raise ValueError('Reranker returned an invalid score')
             if score >= -6:
                 groups[row['assetId']].append((score, row))
-        results = []
-        for aid in ids:
-            selected = sorted(groups[aid], key=lambda pair: -pair[0])[:sources_per_interview]
+        results, cross_checks = [], []
+        for aid in searched:
+            selected = sorted(groups[aid], key=lambda pair: -pair[0])[:1 if aid in cross_ids else sources_per_interview]
             for score, row in selected:
                 self.pool[row['id']] = row
-                results.append(self.model_passage(row))
-        return {'query': query, 'results': results, 'coverage': self.model_coverage(inventory=False),
+                (cross_checks if aid in cross_ids else results).append(self.model_passage(row))
+        response = {'query': query, 'results': results,
+                **({'cross_checks': cross_checks, 'cross_check_note': 'At most three other opened cohort interviews were searched. These are read-required candidates, not proof of agreement or absence.'} if cohort_cross_check else {}),
                 'note': 'Candidates need surrounding-context reading before they can support a final answer.'}
+        if read_context:
+            hits = [self.by_id[self._source_id('evidence', row['id'])] for row in results+cross_checks]
+            windows, words, capped = {}, 0, False
+            # Preserve complete actual hits first, then nearest same-stream
+            # original context. Caps select whole rows, never truncate words.
+            for row in hits:
+                size = len(row['text'].split())
+                if size > 1200 or words+size > 8000 or len(windows) >= 240: capped = True; continue
+                windows[row['id']] = row; words += size
+            for hit in hits:
+                start, end = float(hit.get('seconds', 0)), float(hit.get('end', hit.get('seconds', 0)))
+                eligible = [row for row in self.speech[hit['assetId']] if row.get('stream') == hit.get('stream')
+                    and float(row.get('seconds', 0)) <= end+45 and float(row.get('end', row.get('seconds', 0))) >= start-45]
+                nearby = sorted(eligible, key=lambda row: min(abs(float(row.get('seconds', 0))-start), abs(float(row.get('end', row.get('seconds', 0)))-end)))
+                window_words = 0
+                for row in nearby:
+                    size = len(row['text'].split())
+                    if window_words+size > 1200: capped = True; continue
+                    window_words += size
+                    if row['id'] in windows: continue
+                    if words+size > 8000 or len(windows) >= 240: capped = True; continue
+                    windows[row['id']] = row; words += size
+            admitted = self._read_context_batches(windows)
+            response.update(context=admitted['passages'], previously_read_ids=admitted['previously_read_ids'])
+            # All newly read words are returned in context once, not repeated
+            # in the primary/cross-check routing lists as well.
+            for rows in (results, cross_checks):
+                for row in rows: row.pop('text', None)
+            response['note'] = 'Original neighboring context is included below. Previously-read IDs refer to text returned earlier; candidates are not proof of agreement.'
+            response['context_window_seconds'] = {'before': 45, 'after': 45, 'same_stream': True}
+            if capped:
+                response['context_limit_note'] = 'Context was limited to complete passages: at most 1,200 words per hit window and 8,000 words/240 passages per search. Some original context was omitted; read_passages can retrieve a specific original passage without text truncation.'
+            if cohort_cross_check:
+                response['cross_check_note'] = 'At most three other opened cohort interviews were searched; original context is included, not proof of agreement or absence.'
+            if admitted.get('budget_exhausted'):
+                response.update(budget_exhausted=True, read_budget=admitted['read_budget'], note=admitted['note'])
+        response['coverage'] = self.model_coverage(inventory=False)
+        return response
 
     def read_passages(self, ids, surrounding_context=1):
         if not isinstance(ids, list) or not 1 <= len(ids) <= 30:
@@ -332,7 +393,8 @@ class ResearchTools(FootageTools):
             row = self.pool.get(key)
             if not row or key not in self.by_id:
                 raise ValueError('Read a passage returned by search or interview coverage')
-            rows = self.speech[row['assetId']]
+            rows = [candidate for candidate in self.speech[row['assetId']]
+                    if candidate.get('stream') == row.get('stream')]
             index = next(i for i, candidate in enumerate(rows) if candidate['id'] == key)
             for candidate in rows[max(0, index-surrounding_context):index+surrounding_context+1]:
                 selected[candidate['id']] = candidate
@@ -367,11 +429,77 @@ class ResearchTools(FootageTools):
                 raise ValueError('Choose published interviews with nonempty transcripts')
             summaries.append({'id': self._alias('interviews', key), 'passage_count': count, 'word_count': words})
         result = self._read_original_passages(selected, 'Reading interview context')
+        if result.get('budget_exhausted'): return result
+        self._opening_cohort = getattr(self, '_opening_cohort', set()) | set(ids)
         result['interviews'] = summaries
         result['note'] += ' Opening passages orient the recording, not a verified speaker identity or an exhaustive account of the interview.'
         return result
 
     def _read_original_passages(self, selected, stage):
+        with self._ledger_lock():
+            refusal = self._read_budget_refusal(selected)
+            if refusal: return refusal
+            before = (dict(self.pool), set(self.read_ids), set(self.read_interviews),
+                      set(getattr(self, '_model_read_ids', set())), self.evidence_checks)
+            try:return self._publish_original_passages(selected, stage)
+            except BaseException:
+                self.pool, self.read_ids, self.read_interviews, self._model_read_ids, self.evidence_checks = before
+                raise
+
+    def _ledger_lock(self):
+        if not hasattr(self, '_read_ledger_lock'): self._read_ledger_lock = threading.RLock()
+        return self._read_ledger_lock
+
+    def read_budget(self):
+        """Canonical unique sources are the counters; rereads consume nothing."""
+        with self._ledger_lock():
+            ids = self.read_ids & self.by_id.keys()
+            words = sum(len(self.by_id[key]['text'].split()) for key in ids)
+            value = {'words': words, 'passages': len(ids), 'max_words': self.MAX_READ_WORDS,
+                'max_passages': self.MAX_READ_PASSAGES, 'remaining_words': max(0, self.MAX_READ_WORDS-words),
+                'remaining_passages': max(0, self.MAX_READ_PASSAGES-len(ids)),
+                'exhausted': getattr(self, '_read_budget_exhausted', False)}
+            if value['exhausted']:
+                value['note'] = 'Some context requests were refused in full at this investigation\'s evidence budget. Refusal is not evidence of absence; all admitted original passages remain intact.'
+            return value
+
+    def _read_budget_refusal(self, selected):
+        used = self.read_budget()
+        fresh = set(selected)-self.read_ids
+        words = sum(len(self.by_id[key]['text'].split()) for key in fresh)
+        if used['words']+words <= self.MAX_READ_WORDS and used['passages']+len(fresh) <= self.MAX_READ_PASSAGES:
+            return None
+        self._read_budget_exhausted = True
+        return {'passages': [], 'previously_read_ids': [self._alias('evidence', key) for key in sorted(set(selected)&self.read_ids)],
+            'budget_exhausted': True, 'read_budget': self.read_budget(),
+            'refused_interview_ids': [self._alias('interviews', key) for key in sorted({row['assetId'] for row in selected.values()})],
+            'note': 'This entire context request was not admitted because the run-level evidence budget would be exceeded. No new passages were read. This is a processing limit, not evidence that a source lacks relevant information.'}
+
+    def _read_context_batches(self, selected):
+        with self._ledger_lock():
+            # Admit the complete union BEFORE the first batch so a qualifier in
+            # a later batch cannot be omitted after earlier chunks were read.
+            refusal = self._read_budget_refusal(selected)
+            if refusal: return refusal
+            before = (dict(self.pool), set(self.read_ids), set(self.read_interviews),
+                      set(getattr(self, '_model_read_ids', set())), self.evidence_checks)
+            context, previous = {}, set()
+            try:
+                self.pool.update(selected)
+                references = [self._alias('evidence', key) for key in selected]
+                for offset in range(0, len(references), 30):
+                    batch = self.read_passages(references[offset:offset+30], surrounding_context=0)
+                    if batch.get('budget_exhausted'):
+                        self.pool, self.read_ids, self.read_interviews, self._model_read_ids, self.evidence_checks = before
+                        return batch
+                    context.update({row['id']: row for row in batch['passages']})
+                    previous.update(batch['previously_read_ids'])
+            except BaseException:
+                self.pool, self.read_ids, self.read_interviews, self._model_read_ids, self.evidence_checks = before
+                raise
+            return {'passages': list(context.values()), 'previously_read_ids': sorted(previous-set(context))}
+
+    def _publish_original_passages(self, selected, stage):
         for key, row in selected.items():
             self.pool[key] = row
             self.read_ids.add(key)
@@ -400,8 +528,21 @@ class ResearchTools(FootageTools):
         return {'sources': [{'id': self._alias('evidence', row['id']),
                  'citation_url': '#shot='+self._alias('evidence', row['id'])+'&t='+str(row['seconds'])} for row in selected]}
 
+    @staticmethod
+    def _publish_validated_answer(original, candidate):
+        if isinstance(original, ResearchAnswer):
+            for field in ResearchAnswer.model_fields:
+                setattr(original, field, getattr(candidate, field))
+            return original
+        return candidate
+
     def validate_answer(self, answer):
-        answer = self.normalize_answer(answer)
+        candidate = ResearchAnswer.model_validate(answer).model_copy(deep=True)
+        candidate = self.normalize_answer(candidate)
+        self._validate_canonical_answer(candidate)
+        return self._publish_validated_answer(answer, candidate)
+
+    def _validate_canonical_answer(self, answer):
         if not answer.answer.strip():
             raise ValueError('Provide an answer or explain the missing evidence')
         # Reject fabricated links even in abstentions, before their early return.
@@ -414,29 +555,33 @@ class ResearchTools(FootageTools):
             return
         if not answer.claims:
             raise ValueError('Supported research answers need explicit evidence-linked claims')
-        cited = set()
-        for claim in answer.claims:
+        cited = set();quote_errors=[]
+        for claim_index,claim in enumerate(answer.claims):
             if not claim.text.strip() or not claim.evidence_ids:
                 raise ValueError('Each research claim needs original transcript evidence')
             for key in claim.evidence_ids:
                 if key not in self.read_ids or key not in self.by_id:
                     raise ValueError('Each claim must cite retrieved and read transcript evidence')
                 cited.add(key)
-            text = ' '.join(_normalized(self.pool[key]['text']) for key in claim.evidence_ids)
+            texts = [_normalized(self.pool[key]['text']) for key in claim.evidence_ids]
             for exact_quote in claim.quotes:
-                if not exact_quote.strip() or _normalized(exact_quote) not in text:
+                # A quote must occur in one original chunk. Joining chunks can
+                # fabricate speech across times, speakers or entire recordings.
+                if not exact_quote.strip() or not any(_normalized(exact_quote) in text for text in texts):
                     # Give a precise correction route using evidence the model
                     # already read; never search, correct, or invent testimony.
                     normalized = _normalized(exact_quote)
                     elsewhere = [key for key in sorted(self.read_ids)
                                  if key not in claim.evidence_ids and key in self.by_id
                                  and normalized and normalized in _normalized(self.by_id[key]['text'])]
-                    hint = {'quote_excerpt': exact_quote[:160],
+                    hint = {'claim_index':claim_index,'quote_excerpt': exact_quote[:160],
                             'cited_passage_ids': [self._alias('evidence', key) for key in claim.evidence_ids[:8]],
                             'exact_match_already_read_passage_ids': [self._alias('evidence', key) for key in elsewhere[:5]]}
-                    raise ValueError('A quotation does not match its original transcript evidence. '
-                        +json.dumps(hint, ensure_ascii=False)
-                        +'. Cite the already-read passage containing the exact quote, or omit the quotation. No text correction was attempted.')
+                    if len(quote_errors)<4:quote_errors.append(hint)
+        if quote_errors:
+            raise ValueError('A quotation does not match its original transcript evidence. '
+                +json.dumps(quote_errors, ensure_ascii=False)
+                +'. Cite the already-read passages containing these exact quotes, or omit the quotations. No text correction was attempted.')
         if set(answer.result_ids) != cited:
             raise ValueError('Final result IDs must match the original sources cited by claims')
         for key in re.findall(r'#shot=([^&\s)]+)', answer.answer):
@@ -459,15 +604,21 @@ class ResearchTools(FootageTools):
         contract; these checks ask the model to make its support inspectable.
         Semantic claim support still requires the independent evaluations.
         """
-        if not isinstance(answer, ResearchAnswer):
-            answer = ResearchAnswer.model_validate(answer)
+        original = answer
+        answer = ResearchAnswer.model_validate(answer).model_copy(deep=True)
         # The model supplies claims once. Source cards are a deterministic
         # union, avoiding a second error-prone selection of the same IDs.
         answer.result_ids = list(dict.fromkeys(key for claim in answer.claims for key in claim.evidence_ids))
         answer = self.normalize_answer(answer)
-        self.validate_answer(answer)
+        self._validate_canonical_answer(answer)
+        self._validate_model_presentation(answer)
+        return self._publish_validated_answer(original, answer)
+
+    def _validate_model_presentation(self, answer):
         if answer.outcome == 'not_supported':
             return
+        if len(answer.result_ids) > 40:
+            raise ValueError('Publish at most forty original sources; select the supporting passages before returning the answer')
         if answer.outcome == 'answered' and getattr(self, 'minimum_interviews', 1) >= 3:
             distinct = {_normalized(claim.text).casefold() for claim in answer.claims}
             if len(distinct) < 3:
@@ -486,8 +637,7 @@ class ResearchTools(FootageTools):
             raise ValueError('Include playable inline source links in the answer for every interview used in its claims; obtain them with open_sources')
 
     def commit_answer(self, answer):
-        answer = self.normalize_answer(answer)
-        self.validate_answer(answer)
+        answer = self.validate_answer(answer)
         self.shown = []
         if answer.result_ids:
             self.open_sources(answer.result_ids)

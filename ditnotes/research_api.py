@@ -93,7 +93,17 @@ class ResearchService:
         return {'run_id':run['id'],'question_id':question_id}
 
     def run(self,run,tools,chat):
-        trace=[];trace_lock=threading.Lock();monitor_stop=threading.Event()
+        from .chat import ingest_busy
+        trace=[];trace_lock=threading.Lock();monitor_stop=threading.Event();ingest_interrupted=threading.Event()
+        ingest_message='Ingest started; question saved; retry when quiet.'
+        def guard_ingest():
+            # Latch interruption and keep guarding late ensure_model startup.
+            # Only the chat service's owned Popen handle may be stopped.
+            if ingest_interrupted.is_set() or ingest_busy(self.server):
+                ingest_interrupted.set()
+                chat.stop_owned_model()
+                return True
+            return False
         def notify(stage,details):
             with trace_lock:
                 event={'stage':stage,**details,'at':time.time()}
@@ -103,8 +113,11 @@ class ResearchService:
         def monitor():
             from .research_progress import model_progress
             path=self.server.tool_root/'runtime/chat-model.log'
-            offset=path.stat().st_size if path.exists() else 0
+            try:offset=path.stat().st_size if path.exists() else 0
+            except OSError:offset=0
             while not monitor_stop.wait(1):
+                try:guard_ingest()
+                except Exception:pass # A telemetry failure must not remove the next ingest-priority check.
                 try:
                     with path.open() as stream:
                         stream.seek(offset)
@@ -115,7 +128,7 @@ class ResearchService:
                         offset=stream.tell()
                         if latest:notify(latest.pop('stage'),latest)
                 except FileNotFoundError:continue
-                except Exception:return # Progress reporting must not fail a research answer.
+                except Exception:continue # Keep the ingest guard alive even when progress reporting fails.
         monitor_thread=threading.Thread(target=monitor,daemon=True,name='research-progress')
         tools.notify=notify
         try:
@@ -123,7 +136,9 @@ class ResearchService:
             with self.board() as board:board.update_run(run['id'],status='running')
             notify('Preparing local model',{})
             monitor_thread.start()
+            if guard_ingest():raise RuntimeError(ingest_message)
             chat.ensure_model()
+            if guard_ingest():raise RuntimeError(ingest_message)
             from .research_agent import run_research_agent
             question=run['prompt'];tools.configure_request(question)
             # Operator notes guide the question; saved/generated earlier answers
@@ -132,15 +147,15 @@ class ResearchService:
             if run.get('notes'):prompt+='\n\nOperator research notes (context, not transcript evidence):\n'+run['notes']
             if run.get('followups'):prompt+='\n\nSaved follow-up questions:\n'+'\n'.join(run['followups'])
             answer,messages=asyncio.run(run_research_agent(prompt,tools))
-            monitor_stop.set();monitor_thread.join(timeout=2)
+            if guard_ingest():raise RuntimeError(ingest_message)
             payload={**answer.model_dump(),'results':tools.shown,'coverage':tools.interview_coverage(),
                 'snapshot_revision':tools.snapshot_revision,'messages':messages,
                 'model':'Qwen3.8-27B-4bit','wall_seconds':time.time()-run['created_at'],
                 'provenance_aliases':tools.provenance_aliases()}
             with self.board() as board:board.finish_run(run['id'],payload)
         except Exception as error:
-            interrupted=self.closed.is_set() or chat.closing.is_set()
-            with self.board() as board:board.update_run(run['id'],status='interrupted' if interrupted else 'error',error=str(error))
+            interrupted=ingest_interrupted.is_set() or self.closed.is_set() or chat.closing.is_set()
+            with self.board() as board:board.update_run(run['id'],status='interrupted' if interrupted else 'error',error=ingest_message if ingest_interrupted.is_set() else str(error))
         finally:
             monitor_stop.set()
             if monitor_thread.is_alive():monitor_thread.join(timeout=2)
