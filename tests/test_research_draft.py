@@ -39,6 +39,18 @@ class NativeDraftTests(unittest.IsolatedAsyncioTestCase):
     def draft(self,short,**extra):
         return {'outcome':'answered','blocks':[{'text':'The interviewer asks about uncertainty.','evidence_ids':[short],'quotes':[]}],**extra}
 
+    async def test_native_schema_excludes_recording_ids_from_passage_citations(self):
+        from pydantic import ValidationError
+        with self.assertRaises(ValidationError):
+            spike.NativeDraft(**self.draft('i1'))
+        t,short=self.tools()
+        answer,requests=await self.run_drafts(t,[self.draft('i1'),self.draft(short)])
+        self.assertEqual(len(requests),2)
+        self.assertEqual(answer.result_ids,['one:speech:0'])
+        schema=json.loads(requests[0].content)['response_format']['json_schema']['schema']
+        self.assertEqual(schema['$defs']['DraftBlock']['properties']['evidence_ids']['items']['pattern'],r'^e[1-9][0-9]*$')
+        self.assertIn('string_pattern_mismatch',requests[1].content.decode())
+
     async def test_actual_wire_unwraps_draft_and_returns_canonical_answer_and_storage(self):
         t,short=self.tools();answer,requests=await self.run_drafts(t,[self.draft(short)])
         self.assertIsInstance(answer,ResearchAnswer)
