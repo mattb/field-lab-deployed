@@ -53,6 +53,8 @@ class ResearchTransportTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('max_completion_tokens', body)
         self.assertFalse(body['enable_thinking'])
         self.assertEqual(request.extensions['timeout']['read'], 600)
+        answer_tool = next(tool['function'] for tool in body['tools'] if tool['function']['name'] == 'answer')
+        self.assertNotIn('result_ids', answer_tool['parameters']['properties'])
 
     async def test_failed_local_generation_has_no_hidden_sdk_retry(self):
         from pydantic_ai.exceptions import ModelHTTPError

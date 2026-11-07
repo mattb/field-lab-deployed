@@ -15,6 +15,7 @@ from typing import Literal
 from urllib.parse import quote, unquote
 
 from pydantic import BaseModel, Field
+from pydantic.json_schema import SkipJsonSchema
 
 from .catalog_index import read_snapshot
 from .chat_tools import FootageTools
@@ -30,7 +31,7 @@ class ResearchAnswer(BaseModel):
     outcome: Literal['answered', 'partial', 'not_supported']
     answer: str
     claims: list[ResearchClaim] = Field(default_factory=list)
-    result_ids: list[str] = Field(default_factory=list)
+    result_ids: SkipJsonSchema[list[str]] = Field(default_factory=list)
     scope: Literal['focused', 'corpus'] = 'focused'
     limitations: list[str] = Field(default_factory=list)
     followups: list[str] = Field(default_factory=list)
@@ -38,6 +39,42 @@ class ResearchAnswer(BaseModel):
 
 def _normalized(value):
     return ' '.join(value.split())
+
+
+def _citation_marker_spans(text):
+    """Conservative citation syntax outside Markdown code, escapes and links.
+
+    Keep the original Markdown byte-for-byte apart from explicit markers. The
+    installed CommonMark parser identifies block code; exact backtick runs
+    protect inline code without rendering/reformatting the document.
+    """
+    from markdown_it import MarkdownIt
+    lines = text.splitlines(keepends=True)
+    offsets = [0]
+    for line in lines: offsets.append(offsets[-1]+len(line))
+    protected = []
+    for token in MarkdownIt('commonmark').parse(text):
+        if token.type in ('fence', 'code_block') and token.map:
+            protected.append((offsets[token.map[0]], offsets[token.map[1]]))
+    cursor = 0
+    for match in re.finditer(r'`+', text):
+        if match.start() < cursor or any(a <= match.start() < b for a, b in protected): continue
+        # An escaped opening delimiter is ordinary text, not code.
+        before = text[:match.start()]
+        if (len(before)-len(before.rstrip('\\'))) % 2: continue
+        close = re.search(r'(?<!`)'+re.escape(match[0])+r'(?!`)', text[match.end():])
+        if close:
+            cursor = match.end()+close.end()
+            protected.append((match.start(), cursor))
+    # Existing links are not citation markers, including their labels/destinations.
+    for match in re.finditer(r'!?\[(?:\\.|[^\[\]\n]|\[[^\[\]\n]*\])*\](?:\([^()\n]*\)|\[[^\[\]\n]*\])|<[^\n>]+>', text):
+        protected.append(match.span())
+    pattern = r'\[(e\d+(?:\s*,\s*e\d+)*)\]|\((e\d+(?:\s*,\s*e\d+)*)\)'
+    for match in re.finditer(pattern, text):
+        before = text[:match.start()]
+        if (len(before)-len(before.rstrip('\\'))) % 2: continue
+        if any(a <= match.start() < b for a, b in protected): continue
+        yield match, re.split(r'\s*,\s*', match[1] or match[2])
 
 
 def catalog_coverage(catalog, snapshot_revision=None):
@@ -198,21 +235,38 @@ class ResearchTools(FootageTools):
         """Expand model aliases before canonical evidence validation/persistence."""
         if not isinstance(answer, ResearchAnswer):
             answer = ResearchAnswer.model_validate(answer)
-        def links(text):
+        def links(text, allowed):
+            def source_link(key):
+                if key not in self.read_ids or key not in allowed:
+                    raise ValueError('The answer contains an ungrounded source link')
+                seconds = float(self.by_id[key].get('seconds', 0))
+                return '#shot='+quote(key, safe='')+'&t='+str(seconds)
+            parts = []
+            cursor = 0
+            for match, aliases in _citation_marker_spans(text):
+                parts.append(text[cursor:match.start()])
+                try:
+                    parts.append(', '.join('[source]('+source_link(self._source_id('evidence', alias))+')' for alias in aliases))
+                except ValueError as error:
+                    raise ValueError('The answer contains an ungrounded source link') from error
+                cursor = match.end()
+            parts.append(text[cursor:])
+            text = ''.join(parts)
             def canonical_link(match):
                 key = self._source_id('evidence', unquote(match[1]))
                 # A citation points to this pinned passage, never a timestamp
                 # invented by the model or supplied in a stale URL suffix.
-                seconds = float(self.by_id[key].get('seconds', 0))
-                return '#shot='+quote(key, safe='')+'&t='+str(seconds)
+                return source_link(key)
             try:
                 return re.sub(r'#shot=([^&\s)]+)(?:&[^\s)]*)?', canonical_link, text)
             except ValueError as error:
                 raise ValueError('The answer contains an ungrounded source link') from error
         result_ids = [self._source_id('evidence', key) for key in answer.result_ids]
-        claims = [(claim, [self._source_id('evidence', key) for key in claim.evidence_ids], links(claim.text))
-                  for claim in answer.claims]
-        text = links(answer.answer)
+        claims = []
+        for claim in answer.claims:
+            ids = [self._source_id('evidence', key) for key in claim.evidence_ids]
+            claims.append((claim, ids, links(claim.text, set(ids))))
+        text = links(answer.answer, set(result_ids))
         answer.result_ids = result_ids
         answer.answer = text
         for claim, ids, text in claims:
@@ -282,12 +336,48 @@ class ResearchTools(FootageTools):
             index = next(i for i, candidate in enumerate(rows) if candidate['id'] == key)
             for candidate in rows[max(0, index-surrounding_context):index+surrounding_context+1]:
                 selected[candidate['id']] = candidate
+        return self._read_original_passages(selected, 'Reading transcript evidence')
+
+    def read_interview_openings(self, interview_ids):
+        """Read bounded original opening context, never a generated overview."""
+        if not isinstance(interview_ids, list) or not 1 <= len(interview_ids) <= 12:
+            raise ValueError('Choose one to twelve published interviews with transcripts')
+        ids = list(dict.fromkeys(self._source_id('interviews', key) for key in interview_ids))
+        selected = {}
+        summaries = []
+        for key in ids:
+            if self.assets.get(key, {}).get('status') != 'ready' or not self.speech.get(key):
+                raise ValueError('Choose published interviews with nonempty transcripts')
+            words = 0
+            count = 0
+            for row in self.speech[key]:
+                if row['id'] in selected: continue
+                size = len(row['text'].split())
+                if not size: continue
+                # Normal projection chunks are at most 85 words. Preserve the
+                # complete final chunk, but fail rather than truncate a malformed
+                # oversized original projection or exceed the response budget.
+                if words+size > 450:
+                    raise ValueError('An opening passage exceeds the context budget; use read_passages for its original source')
+                selected[row['id']] = row
+                words += size
+                count += 1
+                if words >= 350: break
+            if not count:
+                raise ValueError('Choose published interviews with nonempty transcripts')
+            summaries.append({'id': self._alias('interviews', key), 'passage_count': count, 'word_count': words})
+        result = self._read_original_passages(selected, 'Reading interview context')
+        result['interviews'] = summaries
+        result['note'] += ' Opening passages orient the recording, not a verified speaker identity or an exhaustive account of the interview.'
+        return result
+
+    def _read_original_passages(self, selected, stage):
         for key, row in selected.items():
             self.pool[key] = row
             self.read_ids.add(key)
             self.read_interviews.add(row['assetId'])
         self.evidence_checks += 1
-        self.notify('Reading transcript evidence', {'passages': len(selected), 'interviews': len({r['assetId'] for r in selected.values()})})
+        self.notify(stage, {'passages': len(selected), 'interviews': len({r['assetId'] for r in selected.values()})})
         already_read = getattr(self, '_model_read_ids', set())
         fresh = {key: row for key, row in selected.items() if key not in already_read}
         self._model_read_ids = already_read | set(fresh)
@@ -335,7 +425,18 @@ class ResearchTools(FootageTools):
             text = ' '.join(_normalized(self.pool[key]['text']) for key in claim.evidence_ids)
             for exact_quote in claim.quotes:
                 if not exact_quote.strip() or _normalized(exact_quote) not in text:
-                    raise ValueError('A quotation does not match its original transcript evidence')
+                    # Give a precise correction route using evidence the model
+                    # already read; never search, correct, or invent testimony.
+                    normalized = _normalized(exact_quote)
+                    elsewhere = [key for key in sorted(self.read_ids)
+                                 if key not in claim.evidence_ids and key in self.by_id
+                                 and normalized and normalized in _normalized(self.by_id[key]['text'])]
+                    hint = {'quote_excerpt': exact_quote[:160],
+                            'cited_passage_ids': [self._alias('evidence', key) for key in claim.evidence_ids[:8]],
+                            'exact_match_already_read_passage_ids': [self._alias('evidence', key) for key in elsewhere[:5]]}
+                    raise ValueError('A quotation does not match its original transcript evidence. '
+                        +json.dumps(hint, ensure_ascii=False)
+                        +'. Cite the already-read passage containing the exact quote, or omit the quotation. No text correction was attempted.')
         if set(answer.result_ids) != cited:
             raise ValueError('Final result IDs must match the original sources cited by claims')
         for key in re.findall(r'#shot=([^&\s)]+)', answer.answer):
@@ -358,6 +459,11 @@ class ResearchTools(FootageTools):
         contract; these checks ask the model to make its support inspectable.
         Semantic claim support still requires the independent evaluations.
         """
+        if not isinstance(answer, ResearchAnswer):
+            answer = ResearchAnswer.model_validate(answer)
+        # The model supplies claims once. Source cards are a deterministic
+        # union, avoiding a second error-prone selection of the same IDs.
+        answer.result_ids = list(dict.fromkeys(key for claim in answer.claims for key in claim.evidence_ids))
         answer = self.normalize_answer(answer)
         self.validate_answer(answer)
         if answer.outcome == 'not_supported':
@@ -367,7 +473,14 @@ class ResearchTools(FootageTools):
             if len(distinct) < 3:
                 raise ValueError('A supported multi-interview synthesis needs at least three distinct evidence-linked claims, rather than one omnibus claim; otherwise return partial with limitations')
         cited_interviews = {self.by_id[key]['assetId'] for claim in answer.claims for key in claim.evidence_ids}
-        linked_ids = {unquote(key) for key in re.findall(r'#shot=([^&\s)]+)', answer.answer)}
+        from markdown_it import MarkdownIt
+        linked_ids = set()
+        for token in MarkdownIt('commonmark').parse(answer.answer):
+            if token.type != 'inline': continue
+            for child in token.children or []:
+                if child.type != 'link_open': continue
+                match = re.match(r'#shot=([^&\s)]+)', child.attrGet('href') or '')
+                if match: linked_ids.add(unquote(match[1]))
         linked_interviews = {self.by_id[key]['assetId'] for key in linked_ids}
         if cited_interviews - linked_interviews:
             raise ValueError('Include playable inline source links in the answer for every interview used in its claims; obtain them with open_sources')

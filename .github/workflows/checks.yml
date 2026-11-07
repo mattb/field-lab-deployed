@@ -26,7 +26,7 @@ jobs:
       - run: |
           python - <<'PYTHON'
           import pathlib, subprocess, sys
-          wanted = {'numpy', 'pydantic-ai-slim', 'openai', 'httpx2'}
+          wanted = {'numpy', 'pydantic-ai-slim', 'openai', 'httpx2', 'markdown-it-py'}
           pins = [line.strip() for line in pathlib.Path('requirements.lock.txt').read_text().splitlines() if line.split('==')[0] in wanted]
           assert len(pins) == len(wanted), 'Missing model-routing test dependency pin'
           subprocess.check_call([sys.executable, '-m', 'pip', 'install', *pins])
@@ -67,7 +67,7 @@ jobs:
           import pathlib, subprocess, sys
           from ditnotes.sqlite_safety import require_safe_sqlite
           require_safe_sqlite()
-          wanted = {'numpy', 'pydantic-ai-slim', 'openai', 'httpx2'}
+          wanted = {'numpy', 'pydantic-ai-slim', 'openai', 'httpx2', 'markdown-it-py'}
           pins = [line.strip() for line in pathlib.Path('requirements.lock.txt').read_text().splitlines() if line.split('==')[0] in wanted]
           assert len(pins) == len(wanted)
           subprocess.check_call([sys.executable, '-m', 'pip', 'install', *pins])
