@@ -15,7 +15,7 @@ This is an early deployment release. Supported target: **Apple Silicon, macOS 27
 Paste this single prompt into Codex on the Mac you want to set up:
 
 ```text
-Install the field-lab Codex skill from https://github.com/mattb/field-lab-deployed/tree/v0.1.0-alpha.3/.agents/skills/field-lab, then read its SKILL.md directly and start the first-time install process for that same release on this Mac. Continue in this turn rather than waiting for automatic skill discovery. OffShoot Pro and CCC are already installed.
+Install the field-lab Codex skill from https://github.com/mattb/field-lab-deployed/tree/v0.1.0-alpha.4/.agents/skills/field-lab, then read its SKILL.md directly and start the first-time install process for that same release on this Mac. Continue in this turn rather than waiting for automatic skill discovery. OffShoot Pro and CCC are already installed.
 ```
 
 This pins both the skill and application to the same tested release. Codex installs the skill, finds or clones the source checkout, checks the Mac, prepares the local software/models, and guides the drive configuration and acceptance tests. It asks for the ingest destination when the actual drive cannot be established from your session. No API key is needed. CCC task setup follows separately after the second physical drive is chosen.

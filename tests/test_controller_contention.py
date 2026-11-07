@@ -113,6 +113,32 @@ class ControllerContention(unittest.TestCase):
         thread.join(4)
         self.assertFalse(thread.is_alive());self.assertFalse(request.exists());self.assertEqual(self.state()['state'],'done')
 
+    def test_failed_job_summary_uses_scoped_cause_without_external_paths(self):
+        result={'counts':{'failed':1},'failures':[
+            {'path':'other-card/other.mp4','stage':'asr','error':'unrelated failure'},
+            {'path':'../private.mp4','stage':'asr','error':'unsafe path'},
+            {'path':'card/clip.mp4','stage':'vlm','error':'worker failed at /Users/private/hidden.mp4'},
+        ]}
+        publish=self.ctl.publish
+        def stop_after_error(phase=None,active=None,error=None):
+            publish(phase,active,error)
+            if phase=='error':self.stop.set()
+        self.ctl.publish=stop_after_error;self.ctl.snapshot=Mock()
+        with patch.object(library,'process',return_value=result):
+            thread=self.worker();thread.join(3)
+        self.assertFalse(thread.is_alive());row=self.state();self.assertEqual(row['state'],'error')
+        self.assertIn('1 media file(s) failed; completed files are retained',row['last_error'])
+        self.assertIn('card/clip.mp4 [vlm]: worker failed',row['last_error'])
+        self.assertNotIn('unrelated failure',row['last_error']);self.assertNotIn('unsafe path',row['last_error']);self.assertNotIn('/Users/private',row['last_error'])
+        self.assertEqual(self.ctl.status()['last_error'],row['last_error']);self.ctl.snapshot.assert_not_called()
+        # Older process results without structured diagnostics keep the original fallback.
+        self.stop.clear()
+        with service.connect(self.c) as db:db.execute("UPDATE jobs SET state='pending',last_error=NULL WHERE job_id='job'")
+        with patch.object(library,'process',return_value={'counts':{'failed':1}}):
+            thread=self.worker();thread.join(3)
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(self.state()['last_error'],'1 media file(s) failed; completed files are retained')
+
     def take_lock(self):
         with library._lock(self.project/'_DIT_NOTES'):return True
 

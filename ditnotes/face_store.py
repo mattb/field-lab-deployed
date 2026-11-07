@@ -122,7 +122,7 @@ class FaceStoreMixin:
     def face_observations(self,content_id=None):
         rows=self.db.execute('SELECT * FROM face_observations'+(' WHERE content_id=?' if content_id else '')+' ORDER BY seconds,id',((content_id,) if content_id else ()))
         return [self._face_observation(row) for row in rows]
-    def name_face(self,face_id,name):
+    def name_face(self,face_id,name,*,sync_linked=True):
         from .project_store import _text
         name=_text(name,200) if name is not None else None
         with self._transaction():
@@ -130,7 +130,7 @@ class FaceStoreMixin:
             if old==name:return
             self.db.execute('UPDATE faces SET name=? WHERE id=?',(name,face_id));self._audit('face_named',{'face_id':face_id,'old_name':old,'name':name})
             link=self.db.execute('SELECT person_id FROM face_voice_links WHERE face_id=?',(face_id,)).fetchone()
-            if name and link:self._sync_linked_name(link[0],name)
+            if name and link and sync_linked:self._sync_linked_name(link[0],name)
     def _sync_linked_name(self,person_id,name):
         person_id=self.canonical_person(person_id)
         old=self.db.execute('SELECT name FROM people WHERE id=?',(person_id,)).fetchone()[0]
@@ -186,6 +186,12 @@ class FaceStoreMixin:
         for r in self.db.execute("SELECT face_a,face_b FROM face_feedback WHERE decision='different'"):
             if {self.canonical_face(r['face_a']),self.canonical_face(r['face_b'])}=={a,b}:return True
         return False
+    def face_groups_contradict(self,source_id,target_id):
+        source_id=self.canonical_face(source_id);target_id=self.canonical_face(target_id)
+        return self.db.execute('''SELECT 1 FROM face_observations a JOIN face_observations b ON a.content_id=b.content_id
+            WHERE a.face_id=? AND b.face_id=? AND ABS(a.seconds-b.seconds)<.02
+            AND (a.frame_ref=b.frame_ref OR a.frame_ref='' OR b.frame_ref='')
+            AND (a.detection_id<>b.detection_id OR a.bbox<>b.bbox) LIMIT 1''',(source_id,target_id)).fetchone() is not None
     def merge_faces(self,source_id,target_id,reason,*,chosen_name=None,feedback=False):
         from .project_store import _text
         reason=_text(reason,1000)
@@ -193,11 +199,7 @@ class FaceStoreMixin:
             source_id=self.canonical_face(source_id);target_id=self.canonical_face(target_id)
             if source_id==target_id:return target_id
             if not feedback and self.faces_marked_different(source_id,target_id):raise ValueError('Operator marked these face groups as different people')
-            contradiction=self.db.execute('''SELECT 1 FROM face_observations a JOIN face_observations b ON a.content_id=b.content_id
-                WHERE a.face_id=? AND b.face_id=? AND ABS(a.seconds-b.seconds)<.02
-                AND (a.frame_ref=b.frame_ref OR a.frame_ref='' OR b.frame_ref='')
-                AND (a.detection_id<>b.detection_id OR a.bbox<>b.bbox) LIMIT 1''',(source_id,target_id)).fetchone()
-            if contradiction:raise ValueError('Resolve distinct faces appearing in the same frame before merging')
+            if self.face_groups_contradict(source_id,target_id):raise ValueError('Resolve distinct faces appearing in the same frame before merging')
             names={r['id']:r['name'] for r in self.db.execute('SELECT id,name FROM faces WHERE id IN (?,?)',(source_id,target_id))}
             if names[source_id] and names[target_id] and names[source_id]!=names[target_id] and chosen_name is None:raise ValueError('Choose a name before merging named faces')
             links={r['face_id']:self.canonical_person(r['person_id']) for r in self.db.execute('SELECT * FROM face_voice_links WHERE face_id IN (?,?)',(source_id,target_id))}

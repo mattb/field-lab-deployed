@@ -73,3 +73,11 @@ Normal service startup also reconciles verified ingest work against the active p
 `tests/test_upgrade_profiles.py` uses disposable three-clip fixtures and a fake inference engine. It proves cache invalidation/reuse, new-profile interruption/resume, unchanged original hashes, stable IDs and preservation of real SQLite operator names, voice links and notes. It also verifies a search refresh with zero new analysis does not construct the inference engine. Real-model upgrade evidence belongs in the release's validation report; these fixtures do not prove footage-specific recognition quality or a fresh field laptop installation.
 
 Code rollback selects an older executable release; it does not reverse database migrations or erase new operator edits. Review compatibility and backups before rolling back. Reanalysis preserves old AI objects, but that alone does not make every future database migration reversible.
+
+## Recovery hardening in alpha.4
+
+Owned analysis scratch now tolerates bounded macOS directory cleanup races. Persistent cleanup errors still fail the job, and cleanup cannot replace the original analysis error. If analysis was already sealed, retry reuses it. Failure history and per-file last causes are checkpointed atomically and survive reconciliation, retries, renames and later success. Queue/status summaries include the relevant cause with external paths redacted. These changes require no database schema migration and preserve operator metadata.
+
+The engine source change conservatively creates a new analysis profile even though model weights and prompts are unchanged. Inspect the reindex plan before processing an existing project with this release; retain old sealed results and all operator metadata. Do not remove an existing index to update.
+
+The explicit clip-face labeling helper accepts operator-confirmed content-ID/name mappings and applies them in one SQLite transaction. It does not infer names from filenames, assign voice names or bypass different-person, simultaneous-face or voice-link conflict guards. Projects and identity labels remain outside the repository.

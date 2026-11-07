@@ -18,6 +18,7 @@ import uuid
 
 from .audio_context import transcript_window, contextual_prompt
 from .diarization import DiarizationModels
+from .scratch import scratch_directory
 
 
 class AnalysisError(RuntimeError):
@@ -296,7 +297,7 @@ class Engine:
         self._ensure_workers()
         timings={};audio_tracks=[];frames=[];jobs={}
         try:
-            with tempfile.TemporaryDirectory(prefix='.work-',dir=output) as temporary:
+            with scratch_directory(prefix='.work-',dir=output) as temporary:
                 work=Path(temporary)
                 with ThreadPoolExecutor(max_workers=2) as pool:
                     futures={pool.submit(self._audio,source,probe,work):'asr',pool.submit(self._video,source,probe,work,output):'vlm'}

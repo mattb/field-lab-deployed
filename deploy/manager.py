@@ -21,7 +21,7 @@ import uuid
 
 DEFAULT_HOME = Path.home() / 'Library/Application Support/Field Lab'
 EXCLUDED_DIRS = {'.git', '.venv', '__pycache__', '.history', 'node_modules', 'models', 'runtime', 'python', 'bin', 'lib', '.pytest_cache', '.conversion-venv', '.cache', '.field-lab-bootstrap', '.deploy-tests', 'tools'}
-EXCLUDED_FILES = {'.DS_Store', 'config.json', 'deploy-ready.json', '.field-lab-release.json', '.field-lab-ready.json'}
+EXCLUDED_FILES = {'.git', '.DS_Store', 'config.json', 'deploy-ready.json', '.field-lab-release.json', '.field-lab-ready.json'}
 
 def digest(path):
     h = hashlib.sha256()

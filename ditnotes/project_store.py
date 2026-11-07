@@ -112,6 +112,17 @@ class ProjectStore(FaceStoreMixin):
     def __exit__(self,*_):self.close()
     @contextmanager
     def _transaction(self):
+        if self.db.in_transaction:
+            savepoint='edit_'+uuid.uuid4().hex
+            self.db.execute('SAVEPOINT '+savepoint)
+            try:
+                yield
+                self.db.execute('RELEASE SAVEPOINT '+savepoint)
+            except BaseException:
+                self.db.execute('ROLLBACK TO SAVEPOINT '+savepoint)
+                self.db.execute('RELEASE SAVEPOINT '+savepoint)
+                raise
+            return
         self.db.execute('BEGIN IMMEDIATE')
         try:
             yield

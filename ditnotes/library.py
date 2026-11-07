@@ -6,13 +6,13 @@ import fcntl
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
-import shutil
-import tempfile
 from urllib.parse import quote
 import uuid
 
 from .engine import Engine
+from .scratch import scratch_directory
 
 NOTES='_DIT_NOTES'
 MEDIA_EXTENSIONS={'.mp4','.mov','.m4v','.mxf','.mts','.m2ts','.mkv','.avi','.webm','.3gp','.wav','.wave','.flac','.aif','.aiff','.mp3','.m4a','.ogg','.opus','.aac','.caf','.wma','.mka'}
@@ -180,8 +180,27 @@ def _catalog(notes,identity,records):
     return catalog
 
 
+def _failure_text(value,project):
+    text=str(value).replace(str(project),'<project>').replace(str(ROOT),'<tool>')
+    text=re.sub(r"(['\"])(/[^'\"]*)\1",'<external-path>',text)
+    return re.sub(r"(?<![\w>])/(?:[^\s'\"<>]+)",'<external-path>',text)
+
+
+def _remember_failure(state,record,relative,error,stage,project):
+    failure={'id':uuid.uuid4().hex,'path':relative,'source_sha256':record.get('sha256'),
+             'profile_id':record['profile_id'],'stage':_failure_text(getattr(error,'stage',stage),project),
+             'error':_failure_text(error,project),'error_type':type(error).__name__,
+             'time':datetime.now(timezone.utc).isoformat()}
+    state.setdefault('failures',[]).append(failure);record['last_failure']=failure
+    return failure
+
+
 def _reconcile_locked(project,notes,identity,state,profile,scopes):
     records=state['paths'];history=dict(records)
+    for relative,old in records.items():
+        if old.get('error') and not old.get('last_failure'):
+            failure=_remember_failure(state,old,relative,RuntimeError(old['error']),'previous_run',project)
+            failure['migrated_legacy_error']=True
     for manifest in (notes/'.objects').glob('*/*/complete.json'):
         try:
             data=_read(manifest,{})
@@ -193,6 +212,7 @@ def _reconcile_locked(project,notes,identity,state,profile,scopes):
     for path in files:
         relative=path.relative_to(project).as_posix();old=history.get(relative,{})
         record={'asset_id':old.get('asset_id',uuid.uuid4().hex),'aliases':old.get('aliases',[]),'profile_id':profile,'status':'pending'}
+        if old.get('last_failure'):record['last_failure']=old['last_failure']
         try:
             before=_stat(path);sha=old.get('sha256') if old.get('stat')==before else _sha(path)
             if _stat(path)!=before:raise RuntimeError('Source changed during reconciliation')
@@ -200,13 +220,16 @@ def _reconcile_locked(project,notes,identity,state,profile,scopes):
                 moved=[(rel,r) for rel,r in history.items() if r.get('sha256')==sha and r.get('stat',{}).get('inode')==before['inode'] and r.get('stat',{}).get('device')==before['device'] and not (project/rel).exists()]
                 if len(moved)==1:
                     rel,r=moved[0];record.update(asset_id=r['asset_id'],aliases=sorted(set(r.get('aliases',[])+[rel])))
+                    if r.get('last_failure'):record['last_failure']=r['last_failure']
             record.update(sha256=sha,stat=before)
             if _valid_object(notes/'.objects'/sha/profile,sha,profile):
                 from .enrichment import register_result
                 register_result(project,identity,sha,_read(notes/'.objects'/sha/profile/'result.json',{}),profile)
                 record.update(status='ready',error=None)
             else:pending.append(relative)
-        except Exception as error:record.update(status='error',error=str(error));pending.append(relative)
+        except Exception as error:
+            failure=_remember_failure(state,record,relative,error,'reconciliation',project)
+            record.update(status='error',error=failure['error']);pending.append(relative)
         updated[relative]=record
     state['paths']=updated;_save(notes/'state.json',state);_catalog(notes,identity,updated)
     return {'pending':pending,'catalog':str(notes/'catalog.json'),'counts':{'files':len(files),'ready':len(files)-len(pending),'pending':len(pending)}}
@@ -235,7 +258,7 @@ def _asset(relative,record,notes):
     asset={'id':record['asset_id'],'content_id':record.get('sha256'),'name':Path(relative).name,'relative_path':relative,
            'aliases':record.get('aliases',[]),'media_url':original,'original_url':original,
            'kind':'audio' if Path(relative).suffix.lower() in {'.wav','.wave','.flac','.aif','.aiff','.mp3','.m4a','.ogg','.opus','.aac','.caf','.wma','.mka'} else 'video',
-           'duration':0,'highlights':[],'transcript':[],'tracks':[],'metadata':{},'status':record['status'],'error':record.get('error')}
+           'duration':0,'highlights':[],'transcript':[],'tracks':[],'metadata':{},'status':record['status'],'error':record.get('error'),'last_failure':record.get('last_failure')}
     if record['status']!='ready':return asset
     folder=notes/'.objects'/record['sha256']/record['profile_id'];result=_read(folder/'result.json',{})
     prefix='/notes/'+quote(str(folder.relative_to(notes)),safe='/')+'/'
@@ -259,7 +282,7 @@ def _asset(relative,record,notes):
 
 
 def process(input_path,project=None,*,models_root=None,engine=None,options=None,progress=None,progress_event=None):
-    """Process file/folder, return {project,catalog,counts}; failures are catalogued per file.
+    """Process file/folder, return {project,catalog,counts,failures}; failure history remains in state.json.
 
     Inject an Engine-compatible object for tests. A caller-supplied engine remains open.
     Existing SHA/profile results survive file moves and are shared by duplicate copies.
@@ -282,10 +305,14 @@ def process(input_path,project=None,*,models_root=None,engine=None,options=None,
         identity['ingest_paths']=sorted(set(identity.get('ingest_paths',[])+[scope]))
         _save(notes/'project.json',identity)
         state=_recover_read(notes/'state.json',{'schema_version':1,'paths':{}})
+        failure_offset=len(state.get('failures',[]))
         _reconcile_locked(project,notes,identity,state,profile,identity['ingest_paths'])
         records=state['paths'];previous=dict(records)
         files=discover(source,project);counts['files']=len(files)
+        current_stage='scanning'
         def emit(stage,**values):
+            nonlocal current_stage
+            current_stage=stage
             if progress_event:progress_event(dict(stage=stage,**values))
         emit('scanning',total=len(files),completed=0,failed=0)
         if engine is None:engine=Engine(models_root=models_root,**options)
@@ -295,6 +322,7 @@ def process(input_path,project=None,*,models_root=None,engine=None,options=None,
                 relative=path.relative_to(project).as_posix();old=records.get(relative,{})
                 emit('hashing',current=relative)
                 record={'asset_id':old.get('asset_id',uuid.uuid4().hex),'aliases':old.get('aliases',[]),'status':'error','profile_id':profile}
+                if old.get('last_failure'):record['last_failure']=old['last_failure']
                 try:
                     before=_stat(path)
                     sha=old.get('sha256') if old.get('stat')==before else None
@@ -307,12 +335,13 @@ def process(input_path,project=None,*,models_root=None,engine=None,options=None,
                                and r.get('stat',{}).get('device')==before['device'] and not (project/rel).exists()]
                         if len(moved)==1:
                             rel,r=moved[0];record['asset_id']=r['asset_id'];record['aliases']=sorted(set(r.get('aliases',[])+[rel]))
+                            if r.get('last_failure'):record['last_failure']=r['last_failure']
                     target=notes/'.objects'/sha/profile
                     if _valid_object(target,sha,profile):counts['reused']+=1
                     else:
                         work_root=notes/'.work';work_root.mkdir(exist_ok=True)
-                        temporary=Path(tempfile.mkdtemp(prefix='analyze-',dir=work_root))
-                        try:
+                        with scratch_directory(prefix='analyze-',dir=work_root) as scratch:
+                            temporary=Path(scratch)
                             emit('analysis',current=relative)
                             if hasattr(engine,'progress_callback'):engine.progress_callback=lambda stage:emit(stage,current=relative)
                             engine.analyze(path,temporary)
@@ -328,16 +357,17 @@ def process(input_path,project=None,*,models_root=None,engine=None,options=None,
                                 target.replace(quarantine/(sha+'-'+profile+'-'+uuid.uuid4().hex))
                                 fsync_dir(quarantine);fsync_dir(target.parent)
                             temporary.replace(target);fsync_dir(target.parent);counts['processed']+=1
-                        finally:
-                            if temporary.exists():shutil.rmtree(temporary)
                     if _stat(path)!=before:raise RuntimeError('Source changed before catalog update; retry')
+                    current_stage='registration'
                     from .enrichment import register_result
                     register_result(project,identity,sha,_read(target/'result.json',{}),profile)
                     record.update(status='ready',error=None)
                     if progress:progress(relative,'ready')
                 except Exception as error:
-                    message=str(error).replace(str(project),'<project>').replace(str(ROOT),'<tool>')
-                    record.update(status='error',error=message);counts['failed']+=1
+                    failure=_remember_failure(state,record,relative,error,current_stage,project)
+                    message=failure['error'];record.update(status='error',error=message);counts['failed']+=1
+                    # Persist the cause before a UI callback can interrupt the batch.
+                    records[relative]=record;_save(notes/'state.json',state)
                     if progress:progress(relative,'error: '+message)
                 records[relative]=record
                 # Checkpoint per file so an interrupted batch resumes completed items.
@@ -353,4 +383,4 @@ def process(input_path,project=None,*,models_root=None,engine=None,options=None,
             _save(notes/'catalog.json',catalog)
         finally:
             if owned:engine.close()
-    return {'project':str(project),'catalog':str(notes/'catalog.json'),'counts':counts}
+    return {'project':str(project),'catalog':str(notes/'catalog.json'),'counts':counts,'failures':state.get('failures',[])[failure_offset:]}

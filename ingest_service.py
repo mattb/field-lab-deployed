@@ -147,7 +147,7 @@ class Controller:
         self.publish('processing',path)
     def loop(self):
         from ditnotes.engine import Engine
-        from ditnotes.library import process
+        from ditnotes.library import process,_failure_text
         self.engine=Engine(models_root=ROOT/'models')
         from concurrent.futures import ThreadPoolExecutor
         warmer=ThreadPoolExecutor(max_workers=1,thread_name_prefix='analysis-startup')
@@ -180,7 +180,18 @@ class Controller:
                     self.publish('processing',str(Path(job['destination']).relative_to(self.project)))
                     awake=subprocess.Popen(['/usr/bin/caffeinate','-i','-w',str(os.getpid())],stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
                     result=self.project_call(lambda:process(job['destination'],self.project,models_root=ROOT/'models',engine=self.engine,progress=self.progress,progress_event=self.progress_event))
-                    if result['counts']['failed']:raise RuntimeError(f'{result["counts"]["failed"]} media file(s) failed; completed files are retained')
+                    if result['counts']['failed']:
+                        message=f'{result["counts"]["failed"]} media file(s) failed; completed files are retained'
+                        scope=Path(job['destination']).relative_to(self.project).as_posix()
+                        for failure in result.get('failures',[]):
+                            if not isinstance(failure,dict) or failure.get('migrated_legacy_error'):continue
+                            path=failure.get('path')
+                            if not isinstance(path,str) or Path(path).is_absolute() or '..' in Path(path).parts:continue
+                            if not (scope=='.' or path==scope or path.startswith(scope+'/')):continue
+                            if not failure.get('error'):continue
+                            message+='; '+_failure_text(f"{path} [{failure.get('stage','processing')}]: {failure['error']}",self.project)
+                            break
+                        raise RuntimeError(message)
                     self.progress_event({'stage':'indexing','current':None})
                     self.snapshot()
                     self.native_progress.update(stage='complete',current=None)
