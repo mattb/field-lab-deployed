@@ -35,6 +35,7 @@ jobs:
       - run: python -m unittest discover -s tests -p 'test_project_retry.py' -v
       - run: python -m unittest discover -s tests -p 'test_model_roles.py' -v
       - run: python -m unittest discover -s tests -p 'test_chat_model_routing.py' -v
+      - run: python -m unittest discover -s tests -p 'test_chat_native_schema_instructions.py' -v
       - run: python -m unittest discover -s tests -p 'test_chat_limits.py' -v
   research:
     runs-on: ubuntu-latest
