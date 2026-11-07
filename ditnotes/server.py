@@ -171,6 +171,7 @@ class _ProjectServer(ThreadingHTTPServer):
         # process group; service.lock remains held until all writers are done.
         super().server_close()
         if hasattr(self,'chat'):self.chat.close()
+        if hasattr(self,'research'):self.research.close()
         if hasattr(self,'metadata'):self.metadata.close()
         if hasattr(self,'search_backend'):self.search_backend.close()
 
@@ -184,7 +185,8 @@ class _Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         from .chat import handle_chat_post
-        if not handle_chat_post(self) and not handle_post(self):serve_model_request(self,self.server.search_backend)
+        from .research_api import handle_research_post
+        if not handle_research_post(self) and not handle_chat_post(self) and not handle_post(self):serve_model_request(self,self.server.search_backend)
 
     def do_GET(self):
         self._serve(False)
@@ -210,6 +212,9 @@ class _Handler(BaseHTTPRequestHandler):
                 self.send_error(403, 'Loopback host required')
                 return
             path = _decode_path(self.path)
+            if path == '/api/research':
+                from .research_api import get_research
+                self._json(get_research(self.server).state(),head);return
             if path == '/api/chat':
                 from .chat import get_chat
                 from urllib.parse import parse_qs,urlsplit

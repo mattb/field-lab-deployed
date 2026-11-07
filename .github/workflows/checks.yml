@@ -36,6 +36,45 @@ jobs:
       - run: python -m unittest discover -s tests -p 'test_model_roles.py' -v
       - run: python -m unittest discover -s tests -p 'test_chat_model_routing.py' -v
       - run: python -m unittest discover -s tests -p 'test_chat_limits.py' -v
+  research:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.11.0'
+      # Metadata tests need the same upstream WAL fix as the field runtime.
+      # Use the Linux sibling of our pinned standalone Python, not an unsafe
+      # runner SQLite or a test-only bypass of the safety requirement.
+      - run: |
+          python - <<'PYTHON'
+          import hashlib, io, os, pathlib, tarfile, urllib.request
+          url = 'https://github.com/astral-sh/python-build-standalone/releases/download/20261026/cpython-3.12.16%2B20261026-x86_64-unknown-linux-gnu-install_only.tar.gz'
+          digest = '6a79e922e50006b601f29e688407659da1c2b86ebcd4e9c7254cf234be8b89de'
+          with urllib.request.urlopen(url, timeout=120) as response:
+              data = response.read()
+          assert hashlib.sha256(data).hexdigest() == digest, 'Research Python archive checksum mismatch'
+          root = pathlib.Path(os.environ['RUNNER_TEMP']) / 'research-runtime'
+          root.mkdir()
+          with tarfile.open(fileobj=io.BytesIO(data), mode='r:gz') as archive:
+              archive.extractall(root, filter='data')
+          PYTHON
+      - run: |
+          "$RUNNER_TEMP/research-runtime/python/bin/python3" - <<'PYTHON'
+          import pathlib, subprocess, sys
+          from ditnotes.sqlite_safety import require_safe_sqlite
+          require_safe_sqlite()
+          wanted = {'numpy', 'pydantic-ai-slim', 'openai', 'httpx2'}
+          pins = [line.strip() for line in pathlib.Path('requirements.lock.txt').read_text().splitlines() if line.split('==')[0] in wanted]
+          assert len(pins) == len(wanted)
+          subprocess.check_call([sys.executable, '-m', 'pip', 'install', *pins])
+          PYTHON
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+        working-directory: search
+      - run: '"$RUNNER_TEMP/research-runtime/python/bin/python3" -m unittest discover -s tests -p "test_research*.py" -v'
   viewer:
     runs-on: ubuntu-latest
     steps:
