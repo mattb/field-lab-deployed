@@ -80,10 +80,13 @@ def local_chat_model():
     client=httpx.AsyncClient(trust_env=False,timeout=600,event_hooks={'request':[loopback]})
     # A timed-out local generation can still occupy the GPU. Never silently
     # duplicate that work through SDK retries; let the operator retry explicitly.
+    # MLX constrains native JSON decoding; also show its schema to the model
+    # through PydanticAI so it can plan the fields before decoding begins.
     model=OpenAIChatModel(chat_model_id(),
         settings={'timeout':600,'max_retries':0},
         provider=OpenAIProvider(base_url=chat_base_url(),api_key='local',http_client=client),
         profile=OpenAIModelProfile(supports_image_input=True,supports_forced_tool_choice=False,
+            native_output_requires_schema_in_instructions=True,
             openai_chat_supports_max_completion_tokens=False))
     return model,client
 
