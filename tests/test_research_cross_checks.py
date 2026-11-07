@@ -106,7 +106,7 @@ class CohortCrossCheckTests(unittest.TestCase):
                     (51, 1, 'Different stream must not be mixed.'), (98, 0, 'Too late.')])]
         t.speech = {'one': rows}; t.by_id = {r['id']:r for r in rows}; t.pool = {}
         t.call = lambda **_: {'rows':[rows[5]]}
-        t.infer = lambda action, values, query='': {'vectors':[[1.0]+[0.0]*383]} if action=='embed_text' else {'scores':[1]}
+        t.infer = lambda action, values, query='': {'vectors':[[1.0]+[0.0]*383]} if action=='embed_text' else {'scores':[1]*len(values)}
         result = t.search_interviews('condition', ['one'], read_context=True)
         returned = {t.provenance_aliases()['evidence'][r['id']]:r for r in result['context']}
         self.assertIn(rows[1]['id'], returned)
@@ -123,7 +123,7 @@ class CohortCrossCheckTests(unittest.TestCase):
                      kind='speech', text=' '.join([f'chunk{i}']*85)) for i in range(400)]
         t.speech = {'one':rows}; t.by_id = {r['id']:r for r in rows}; t.pool = {}
         t.call = lambda **_: {'rows':[rows[0]]}
-        t.infer = lambda action, values, query='': {'vectors':[[1.0]+[0.0]*383]} if action=='embed_text' else {'scores':[1]}
+        t.infer = lambda action, values, query='': {'vectors':[[1.0]+[0.0]*383]} if action=='embed_text' else {'scores':[1]*len(values)}
         result = t.search_interviews('condition', ['one'], read_context=True)
         self.assertIn('Some original context was omitted', result['context_limit_note'])
         self.assertLessEqual(sum(len(r['text'].split()) for r in result['context']), 1200)

@@ -42,6 +42,18 @@ class ResearchService:
     def state(self):
         catalog=self.server.catalog.read();coverage=coverage_from_catalog(catalog)
         with self.board() as board:state=board.state(coverage['snapshot_revision'])
+        # Keep full model diagnostics durable in SQLite, not in every 1.5s UI
+        # poll (which includes answer history and runs). Playback and operator
+        # content stay intact; the UI does not consume these diagnostic maps.
+        def public_answer(value):
+            if value is None:return None
+            public={key:item for key,item in value.items() if key not in ('messages','provenance_aliases')}
+            if isinstance(public.get('coverage'),dict):
+                public['coverage']={key:item for key,item in public['coverage'].items() if key!='read_passage_ids'}
+            return public
+        state['runs']=[public_answer(row) for row in state['runs']]
+        state['questions']=[{**row,'answers':[public_answer(answer) for answer in row['answers']],
+            'latest_answer':public_answer(row['latest_answer'])} for row in state['questions']]
         return {**state,'coverage':coverage,'can_run':self.owner and not self.closed.is_set()}
 
     def question(self,values):

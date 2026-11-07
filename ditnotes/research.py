@@ -216,15 +216,22 @@ class ResearchTools(FootageTools):
             if not hasattr(self, '_aliases'):
                 self._aliases = {'evidence': {}, 'interviews': {}}
                 self._canonical_aliases = {'evidence': {}, 'interviews': {}}
-            forward = self._canonical_aliases[kind]
+            prefixes = {'evidence':'e', 'interviews':'i', 'voices':'v'}
+            if kind not in prefixes:
+                raise ValueError('Unknown research reference kind')
+            forward = self._canonical_aliases.setdefault(kind, {})
+            self._aliases.setdefault(kind, {})
             if canonical not in forward:
-                short = ('e' if kind == 'evidence' else 'i') + str(len(forward)+1)
+                short = prefixes[kind] + str(len(forward)+1)
                 forward[canonical] = short
                 self._aliases[kind][short] = canonical
             return forward[canonical]
 
     def _source_id(self, kind, value):
-        known = self.by_id if kind == 'evidence' else self.speech
+        if kind == 'voices':
+            known = {person for row in self.by_id.values() for person in (row.get('speakerIds') or [])}
+        else:
+            known = self.by_id if kind == 'evidence' else self.speech
         if isinstance(value, str) and value in known:
             return value  # Internal callers and older API clients remain valid.
         mapped = getattr(self, '_aliases', {}).get(kind, {}).get(value) if isinstance(value, str) else None
@@ -241,40 +248,50 @@ class ResearchTools(FootageTools):
         """Expand model aliases before canonical evidence validation/persistence."""
         if not isinstance(answer, ResearchAnswer):
             answer = ResearchAnswer.model_validate(answer)
-        def links(text, allowed):
+        citation_issues = []
+        def links(text, allowed, location):
+            def checked_reference(reference):
+                try:key = self._source_id('evidence', reference)
+                except ValueError:key = None
+                category = ('unknown' if key is None else 'unread' if key not in self.read_ids
+                    else 'read_but_not_in_this_claim' if key not in allowed and location.startswith('claim ')
+                    else 'read_but_not_in_claim_union' if key not in allowed else None)
+                if category:
+                    marker = self._alias('evidence', key) if key is not None else reference if re.fullmatch(r'e\d{1,8}', reference) else 'unknown reference'
+                    issue = {'marker': marker, 'category': category, 'location': location}
+                    if len(citation_issues) < 4 and issue not in citation_issues:citation_issues.append(issue)
+                    return None
+                return key
             def source_link(key):
-                if key not in self.read_ids or key not in allowed:
-                    raise ValueError('The answer contains an ungrounded source link')
                 seconds = float(self.by_id[key].get('seconds', 0))
                 return '#shot='+quote(key, safe='')+'&t='+str(seconds)
             parts = []
             cursor = 0
             for match, aliases in _citation_marker_spans(text):
                 parts.append(text[cursor:match.start()])
-                try:
-                    parts.append(', '.join('[source]('+source_link(self._source_id('evidence', alias))+')' for alias in aliases))
-                except ValueError as error:
-                    raise ValueError('The answer contains an ungrounded source link') from error
+                keys = [checked_reference(alias) for alias in aliases]
+                parts.append(', '.join('[source]('+source_link(key)+')' for key in keys) if all(keys) else match[0])
                 cursor = match.end()
             parts.append(text[cursor:])
             text = ''.join(parts)
             def canonical_link(match):
-                key = self._source_id('evidence', unquote(match[1]))
+                key = checked_reference(unquote(match[1]))
                 # A citation points to this pinned passage, never a timestamp
                 # invented by the model or supplied in a stale URL suffix.
-                return source_link(key)
-            try:
-                return re.sub(r'#shot=([^&\s)]+)(?:&[^\s)]*)?', canonical_link, text)
-            except ValueError as error:
-                raise ValueError('The answer contains an ungrounded source link') from error
+                return source_link(key) if key is not None else match[0]
+            return re.sub(r'#shot=([^&\s)]+)(?:&[^\s)]*)?', canonical_link, text)
         result_ids = [self._source_id('evidence', key) for key in answer.result_ids]
         claims = []
-        for claim in answer.claims:
+        for index, claim in enumerate(answer.claims):
             ids = [self._source_id('evidence', key) for key in claim.evidence_ids]
-            claims.append((claim, ids, links(claim.text, set(ids))))
-        text = links(answer.answer, set(result_ids))
-        limitations = [links(text, set(result_ids)) for text in answer.limitations]
-        followups = [links(text, set(result_ids)) for text in answer.followups]
+            claims.append((claim, ids, links(claim.text, set(ids), 'claim '+str(index))))
+        text = links(answer.answer, set(result_ids), 'answer')
+        limitations = [links(text, set(result_ids), 'limitations') for text in answer.limitations]
+        followups = [links(text, set(result_ids), 'followups') for text in answer.followups]
+        if citation_issues:
+            raise ValueError('The answer contains an ungrounded source link. Citation issues: '
+                +json.dumps(citation_issues, ensure_ascii=False)
+                +'. Remove unknown or unread markers. For an already-read passage that supports the same point, add its exact marker ID to the relevant structured claim evidence_ids; otherwise remove that marker. Do not add unrelated evidence merely to pass validation.')
         answer.result_ids = result_ids
         answer.answer = text
         answer.limitations = limitations
@@ -291,10 +308,47 @@ class ResearchTools(FootageTools):
         # end times stay visible so separate excerpts cannot imply one exchange.
         value = {'id': self._alias('evidence', row['id']), 'asset_id': self._alias('interviews', row['assetId']),
                  'seconds': row.get('seconds', 0), 'end': row.get('end', row.get('seconds', 0)),
-                 'stream': row.get('stream'), 'text': row['text']}
+                 'stream': row.get('stream'), 'text': row['text'],
+                 'voice_groups': [self._alias('voices', person) for person in (row.get('speakerIds') or [])]}
+        # Saved voice groups are fallible whole-sentence time associations, not
+        # word attribution or identity/role assertions. Multiple groups can be
+        # sequential turns or overlap; projection association can include other
+        # audio streams. Keep their stored equality without inventing a person.
         if row.get('personNames') and len(row.get('speakerIds', [])) == len(row['personNames']) == 1:
             value['speaker_name'] = row['personNames'][0]
         return value
+
+    @staticmethod
+    def _select_context_hits(scored_rows, count):
+        """Prefer distinct original dialogue windows after relevance gating.
+
+        Keep the best hit first. Additional slots prefer non-overlapping
+        +/-45-second windows in the same source/stream before near duplicates.
+        If no distinct windows remain, preserve the ranked overlapping hits.
+        This selects candidates only; original reads and their budgets remain
+        separate, and temporal diversity does not establish different speakers.
+        """
+        ranked = sorted(scored_rows, key=lambda pair: -pair[0])
+        if count <= 1:
+            return ranked[:count]
+        selected = []
+        for pair in ranked:
+            row = pair[1]
+            start = float(row.get('seconds', 0))-45
+            end = float(row.get('end', row.get('seconds', 0)))+45
+            overlaps = any(
+                row['assetId'] == other['assetId']
+                and row.get('stream') == other.get('stream')
+                and start <= float(other.get('end', other.get('seconds', 0)))+45
+                and end >= float(other.get('seconds', 0))-45
+                for _, other in selected)
+            if not overlaps:
+                selected.append(pair)
+                if len(selected) == count:
+                    return selected
+        selected_ids = {row['id'] for _, row in selected}
+        selected.extend(pair for pair in ranked if pair[1]['id'] not in selected_ids)
+        return selected[:count]
 
     def search_interviews(self, query, interview_ids=None, sources_per_interview=2, cohort_cross_check=False, read_context=False):
         if not isinstance(query, str) or not query.strip() or len(query) > 500:
@@ -318,22 +372,33 @@ class ResearchTools(FootageTools):
         self.notify('Searching interviews', {'query': query, 'interviews': len(searched)})
         vector = self.infer('embed_text', [query])['vectors'][0]
         packet = self.call(action='research_search', query=query, asset_ids=searched, vector=vector,
-                           per_interview=min(12, sources_per_interview*3))
-        candidates = [r for r in packet['rows'] if r.get('id') in self.by_id]
+                           per_interview=12)  # Retrieval recall is independent of displayed/source count.
+        candidates = [self.by_id[r['id']] for r in packet['rows'] if r.get('id') in self.by_id]
         self.searched_interviews.update(searched)
         self.evidence_checks += 1
-        scores = self.infer('rerank', [r['text'] for r in candidates], query)['scores'] if candidates else []
-        if len(scores) != len(candidates):
+        sentence_groups = self._original_sentence_groups()
+        ranking_texts, candidate_texts = {}, []
+        for row in candidates:
+            texts = [row['text']]
+            context = self._ranking_context_text(row, sentence_groups)
+            if context is not None: texts.append(context)
+            candidate_texts.append(texts)
+            for text in texts: ranking_texts.setdefault(text, len(ranking_texts))
+        # One batched inference, with duplicate original strings scored once.
+        # Ranking context is not a read and never enters published source text.
+        scores = self.infer('rerank', list(ranking_texts), query)['scores'] if ranking_texts else []
+        if len(scores) != len(ranking_texts):
             raise ValueError('Reranker returned an incorrect score count')
+        if any(not isinstance(score, (int, float)) or not math.isfinite(score) for score in scores):
+            raise ValueError('Reranker returned an invalid score')
         groups = {i: [] for i in searched}
-        for row, score in zip(candidates, scores):
-            if not isinstance(score, (int, float)) or not math.isfinite(score):
-                raise ValueError('Reranker returned an invalid score')
+        for row, texts in zip(candidates, candidate_texts):
+            score = max(scores[ranking_texts[text]] for text in texts)
             if score >= -6:
                 groups[row['assetId']].append((score, row))
         results, cross_checks = [], []
         for aid in searched:
-            selected = sorted(groups[aid], key=lambda pair: -pair[0])[:1 if aid in cross_ids else sources_per_interview]
+            selected = self._select_context_hits(groups[aid], 1 if aid in cross_ids else sources_per_interview)
             for score, row in selected:
                 self.pool[row['id']] = row
                 (cross_checks if aid in cross_ids else results).append(self.model_passage(row))
@@ -343,25 +408,41 @@ class ResearchTools(FootageTools):
         if read_context:
             hits = [self.by_id[self._source_id('evidence', row['id'])] for row in results+cross_checks]
             windows, words, capped = {}, 0, False
-            # Preserve complete actual hits first, then nearest same-stream
-            # original context. Caps select whole rows, never truncate words.
+            sentence_groups = self._original_sentence_groups()
+            # A source sentence can span several projection chunks. Admit the
+            # complete sibling union or omit it honestly under the search cap.
             for row in hits:
-                size = len(row['text'].split())
-                if size > 1200 or words+size > 8000 or len(windows) >= 240: capped = True; continue
-                windows[row['id']] = row; words += size
+                unit = sentence_groups[self._original_sentence_key(row)]
+                fresh = [part for part in unit if part['id'] not in windows]
+                size = sum(len(part['text'].split()) for part in fresh)
+                if sum(len(part['text'].split()) for part in unit) > 1200 or words+size > 8000 or len(windows)+len(fresh) > 240:
+                    capped = True
+                    continue
+                windows.update({part['id']:part for part in fresh})
+                words += size
             for hit in hits:
                 start, end = float(hit.get('seconds', 0)), float(hit.get('end', hit.get('seconds', 0)))
                 eligible = [row for row in self.speech[hit['assetId']] if row.get('stream') == hit.get('stream')
                     and float(row.get('seconds', 0)) <= end+45 and float(row.get('end', row.get('seconds', 0))) >= start-45]
                 nearby = sorted(eligible, key=lambda row: min(abs(float(row.get('seconds', 0))-start), abs(float(row.get('end', row.get('seconds', 0)))-end)))
-                window_words = 0
+                window_words, seen_sentences = 0, set()
                 for row in nearby:
-                    size = len(row['text'].split())
-                    if window_words+size > 1200: capped = True; continue
+                    sentence = self._original_sentence_key(row)
+                    if sentence in seen_sentences: continue
+                    seen_sentences.add(sentence)
+                    unit = sentence_groups[sentence]
+                    size = sum(len(part['text'].split()) for part in unit)
+                    if window_words+size > 1200:
+                        capped = True
+                        continue
                     window_words += size
-                    if row['id'] in windows: continue
-                    if words+size > 8000 or len(windows) >= 240: capped = True; continue
-                    windows[row['id']] = row; words += size
+                    fresh = [part for part in unit if part['id'] not in windows]
+                    fresh_words = sum(len(part['text'].split()) for part in fresh)
+                    if words+fresh_words > 8000 or len(windows)+len(fresh) > 240:
+                        capped = True
+                        continue
+                    windows.update({part['id']:part for part in fresh})
+                    words += fresh_words
             admitted = self._read_context_batches(windows)
             response.update(context=admitted['passages'], previously_read_ids=admitted['previously_read_ids'])
             # All newly read words are returned in context once, not repeated
@@ -371,7 +452,7 @@ class ResearchTools(FootageTools):
             response['note'] = 'Original neighboring context is included below. Previously-read IDs refer to text returned earlier; candidates are not proof of agreement.'
             response['context_window_seconds'] = {'before': 45, 'after': 45, 'same_stream': True}
             if capped:
-                response['context_limit_note'] = 'Context was limited to complete passages: at most 1,200 words per hit window and 8,000 words/240 passages per search. Some original context was omitted; read_passages can retrieve a specific original passage without text truncation.'
+                response['context_limit_note'] = 'Context was limited to complete original ASR sentences: at most 1,200 words per hit window and 8,000 words/240 chunks per search. Some original context was omitted, and a candidate may remain unread if its whole sentence exceeded these limits. read_passages can request its complete original sentence under the run budget without text truncation.'
             if cohort_cross_check:
                 response['cross_check_note'] = 'At most three other opened cohort interviews were searched; original context is included, not proof of agreement or absence.'
             if admitted.get('budget_exhausted'):
@@ -407,27 +488,25 @@ class ResearchTools(FootageTools):
         ids = list(dict.fromkeys(self._source_id('interviews', key) for key in interview_ids))
         selected = {}
         summaries = []
+        sentence_groups = self._original_sentence_groups()
         for key in ids:
             if self.assets.get(key, {}).get('status') != 'ready' or not self.speech.get(key):
                 raise ValueError('Choose published interviews with nonempty transcripts')
+            opening = {}
             words = 0
-            count = 0
             for row in self.speech[key]:
-                if row['id'] in selected: continue
-                size = len(row['text'].split())
-                if not size: continue
-                # Normal projection chunks are at most 85 words. Preserve the
-                # complete final chunk, but fail rather than truncate a malformed
-                # oversized original projection or exceed the response budget.
-                if words+size > 450:
-                    raise ValueError('An opening passage exceeds the context budget; use read_passages for its original source')
-                selected[row['id']] = row
-                words += size
-                count += 1
+                if row['id'] in opening: continue
+                if not row['text'].split(): continue
+                unit = sentence_groups[self._original_sentence_key(row)]
+                opening.update({part['id']:part for part in unit})
+                words = sum(len(part['text'].split()) for part in opening.values())
+                # Orientation target is soft; never stop halfway through the
+                # original ASR sentence. The global read budget remains hard.
                 if words >= 350: break
-            if not count:
+            if not opening:
                 raise ValueError('Choose published interviews with nonempty transcripts')
-            summaries.append({'id': self._alias('interviews', key), 'passage_count': count, 'word_count': words})
+            selected.update(opening)
+            summaries.append({'id': self._alias('interviews', key), 'passage_count': len(opening), 'word_count': words})
         result = self._read_original_passages(selected, 'Reading interview context')
         if result.get('budget_exhausted'): return result
         self._opening_cohort = getattr(self, '_opening_cohort', set()) | set(ids)
@@ -435,8 +514,68 @@ class ResearchTools(FootageTools):
         result['note'] += ' Opening passages orient the recording, not a verified speaker identity or an exhaustive account of the interview.'
         return result
 
+    @staticmethod
+    def _original_sentence_key(row):
+        match = re.fullmatch(r'(.+):speech:(\d+):(\d+)', row['id'])
+        if match and match[1] == row['assetId']:
+            return ('sentence', row['assetId'], row.get('stream'), match[2])
+        # Legacy IDs carry no trustworthy sentence grouping information.
+        return ('row', row['id'])
+
+    def _original_sentence_groups(self):
+        groups = {}
+        for row in self.by_id.values():
+            groups.setdefault(self._original_sentence_key(row), []).append(row)
+        for key, rows in groups.items():
+            if key[0] == 'sentence':
+                rows.sort(key=lambda row:int(row['id'].rsplit(':', 1)[1]))
+        return groups
+
+    def _ranking_context_text(self, hit, sentence_groups):
+        """Bounded original context for ranking only, never evidence admission.
+
+        Select whole same-stream sentences, closest first within +/-45 seconds.
+        An oversized anchor keeps its bare-fragment scoring path; its sentence
+        is not shortened to fit. The existing cross-encoder tokenizer retains
+        its own 512-token pair limit independently of this 350-word bound.
+        """
+        anchor_key = self._original_sentence_key(hit)
+        anchor = sentence_groups[anchor_key]
+        selected = {row['id']:row for row in anchor}
+        words = sum(len(row['text'].split()) for row in anchor)
+        if words > 350: return None
+        start, end = float(hit.get('seconds', 0)), float(hit.get('end', hit.get('seconds', 0)))
+        nearby = [row for row in self.speech[hit['assetId']]
+            if row.get('stream') == hit.get('stream') and float(row.get('seconds', 0)) <= end+45
+            and float(row.get('end', row.get('seconds', 0))) >= start-45]
+        nearby.sort(key=lambda row:min(abs(float(row.get('seconds', 0))-start),
+                                      abs(float(row.get('end', row.get('seconds', 0)))-end)))
+        seen = {anchor_key}
+        for row in nearby:
+            key = self._original_sentence_key(row)
+            if key in seen: continue
+            seen.add(key)
+            unit = sentence_groups[key]
+            size = sum(len(part['text'].split()) for part in unit)
+            if words+size > 350: continue
+            selected.update({part['id']:part for part in unit})
+            words += size
+        ordered = sorted(selected.values(), key=lambda row:(float(row.get('seconds', 0)),
+            self._original_sentence_key(row), int(row['id'].rsplit(':', 1)[1])
+            if self._original_sentence_key(row)[0] == 'sentence' else 0))
+        return ' '.join(row['text'] for row in ordered)
+
+    def _expand_original_sentences(self, selected):
+        groups = self._original_sentence_groups()
+        expanded = {}
+        for row in selected.values():
+            for part in groups[self._original_sentence_key(row)]:
+                expanded[part['id']] = part
+        return expanded
+
     def _read_original_passages(self, selected, stage):
         with self._ledger_lock():
+            selected = self._expand_original_sentences(selected)
             refusal = self._read_budget_refusal(selected)
             if refusal: return refusal
             before = (dict(self.pool), set(self.read_ids), set(self.read_interviews),
@@ -477,6 +616,7 @@ class ResearchTools(FootageTools):
 
     def _read_context_batches(self, selected):
         with self._ledger_lock():
+            selected = self._expand_original_sentences(selected)
             # Admit the complete union BEFORE the first batch so a qualifier in
             # a later batch cannot be omitted after earlier chunks were read.
             refusal = self._read_budget_refusal(selected)

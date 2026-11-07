@@ -43,14 +43,16 @@ export function ResearchPanel({projectId,onSelect}){
   {!active&&lastRun&&['error','interrupted'].includes(lastRun.status)&&<p role="alert">{lastRun.error||'Research was interrupted. Retry to start a new answer.'}</p>}
   {answer&&<section className="research-answer">
    <div className="research-answer-toolbar"><h3>Answer</h3>{answer.model&&<small>{answer.model}{Number.isFinite(answer.wall_seconds)?` · ${researchDuration(answer.wall_seconds*1000)}`:''}</small>}{answers.length>1&&<select aria-label="Answer history" value={history} onChange={e=>setHistory(e.target.value)}><option value="">Latest answer</option>{answers.map((a,i)=><option key={a.id} value={a.id}>Answer {i+1}{a.model?` · ${a.model}`:''}{a.created_at?` · ${new Date(researchTimeMs(a.created_at)).toLocaleString()}`:''}</option>)}</select>}</div>
+   {answer.outcome==='partial'&&<p role="status">Partial answer: some requested evidence is missing.</p>}
+   {answer.outcome==='not_supported'&&<p role="status">A supported answer was not established.</p>}
    {stale&&<p className="research-stale">{dirty?'The question has unsaved changes.':'The question or indexed footage has changed since this answer.'} Ask again for an updated answer.</p>}
    <ChatMarkdown text={answer.answer||''} results={sources} onSelect={selectSource}/>
-   {!!answer.limitations?.length&&<details><summary>Limitations</summary><ul>{answer.limitations.map((x,i)=><li key={i}>{x}</li>)}</ul></details>}
+   {!!answer.limitations?.length&&<details open={answer.outcome==='partial'||answer.outcome==='not_supported'}><summary>Limitations</summary><ul>{answer.limitations.map((x,i)=><li key={i}><ChatMarkdown text={x} results={sources} onSelect={selectSource}/></li>)}</ul></details>}
    {!!answer.claims?.length&&<details><summary>Claims and evidence</summary>{answer.claims.map((c,i)=><div className="research-claim" key={i}><ChatMarkdown text={c.text||c.claim||''} results={sources} onSelect={selectSource}/>{(c.evidence_ids||[]).map(id=>{const source=sources.find(s=>s.id===id);return source?<button key={id} className="research-citation" onClick={()=>selectSource(source)}>{source.filename} · {stamp(source.seconds)}</button>:null;})}</div>)}</details>}
    {answer.coverage&&<details><summary>Answer coverage</summary><p>{coverageText(answer.coverage)}</p>{answer.coverage.interviews?.map((r,i)=><p key={r.id||i}>{r.label||r.filename||r.id} · {r.status||'indexed'}</p>)}</details>}
    {!!answer.trace?.length&&<details><summary>Research steps</summary><ol>{answer.trace.map((s,i)=><li key={i}>{s.stage}{s.query?`: ${s.query}`:''}</li>)}</ol></details>}
    {!!sources.length&&<div className="research-sources"><h3>Sources</h3>{sources.map((r,i)=><button className="chat-result" key={`${r.id}-${i}`} onClick={()=>selectSource(r)}>{safeLocalUrl(r.image)&&<img src={safeLocalUrl(r.image)} alt=""/>}<span>{r.filename} · {stamp(r.seconds)}<small>{r.text}</small></span></button>)}</div>}
-   {!!answer.followups?.length&&<details><summary>Suggested follow-up questions</summary><ul>{answer.followups.map((q,i)=><li key={i}>{q}</li>)}</ul></details>}
+   {!!answer.followups?.length&&<details><summary>Suggested follow-up questions</summary><ul>{answer.followups.map((q,i)=><li key={i}><ChatMarkdown text={q} results={sources} onSelect={selectSource}/></li>)}</ul></details>}
   </section>}
  </div>;
 }

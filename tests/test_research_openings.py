@@ -76,12 +76,16 @@ class ResearchOpeningTests(unittest.TestCase):
                 self.assertEqual(tools.read_ids, set())
                 self.assertEqual(tools.read_interviews, set())
 
-    def test_oversized_original_fails_without_truncation_or_partial_read(self):
+    def test_orientation_target_is_soft_but_run_budget_remains_hard(self):
         tools = self.tools(words=451)
         original = tools.by_id['one:speech:0']['text']
-        with self.assertRaisesRegex(ValueError, 'exceeds the context budget'):
-            tools.read_interview_openings(['one'])
+        result = tools.read_interview_openings(['one'])
+        self.assertEqual(result['interviews'][0]['word_count'], 451)
         self.assertEqual(tools.by_id['one:speech:0']['text'], original)
+        self.assertEqual(tools.read_ids, {'one:speech:0'})
+        tools = self.tools(words=12001)
+        refused = tools.read_interview_openings(['one'])
+        self.assertTrue(refused['budget_exhausted'])
         self.assertEqual(tools.read_ids, set())
 
 

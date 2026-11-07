@@ -15,8 +15,8 @@ def user_text(messages):
 
 
 def supported(short):
-    return ModelResponse(parts=[TextPart(json.dumps({'outcome':'answered', 'answer':'The original interview discusses uncertainty ['+short+'].',
-        'claims':[{'text':'The interview discusses uncertainty.', 'evidence_ids':[short]}]}))])
+    return ModelResponse(parts=[TextPart(json.dumps({'outcome':'answered',
+        'blocks':[{'text':'The original interview discusses uncertainty.', 'evidence_ids':[short]}]}))])
 
 
 class ResearchPhaseTests(unittest.IsolatedAsyncioTestCase):
@@ -33,7 +33,7 @@ class ResearchPhaseTests(unittest.IsolatedAsyncioTestCase):
         def write(messages,info):
             counts['writer']+=1
             self.assertEqual(info.function_tools,[])
-            self.assertEqual(info.model_settings['max_tokens'],3600)
+            self.assertEqual(info.model_settings['max_tokens'],5500)
             self.assertTrue(info.model_settings['extra_body']['enable_thinking'])
             text=user_text(messages)
             self.assertIn(tools.by_id['one:speech:0']['text'],text)
@@ -85,9 +85,9 @@ class ResearchPhaseTests(unittest.IsolatedAsyncioTestCase):
             text=user_text(messages)
             self.assertNotIn('COLLECTOR DRAFT SENTINEL',text)
             self.assertNotIn('Unread candidate sentinel',text)
-            self.assertIn('"stop_reason": "returned"',text)
+            self.assertIn('"stop_reason":"returned"',text)
             self.assertEqual(info.function_tools,[])
-            return ModelResponse(parts=[TextPart(json.dumps({'outcome':'not_supported','answer':'The collected evidence does not establish this premise.'}))])
+            return ModelResponse(parts=[TextPart(json.dumps({'outcome':'not_supported','blocks':[{'text':'The collected evidence does not establish this premise.'}]}))])
         writer,client=make_research_agent();collector=make_collection_agent(FunctionModel(collect))
         with writer.override(model=FunctionModel(write)),patch('ditnotes.research_agent.make_research_agent',return_value=(writer,client)),patch('ditnotes.research_agent.make_collection_agent',return_value=collector):
             await run_research_agent('Compare the accounts',tools)

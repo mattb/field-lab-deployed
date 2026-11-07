@@ -65,6 +65,30 @@ class ResearchIntegrationTests(unittest.TestCase):
             tools.assert_not_called()
             chat.assert_not_called()
 
+    def test_polling_omits_diagnostics_without_erasing_durable_history(self):
+        service=self.service()
+        with self.board() as board:
+            q=board.create('A saved question',notes='Keep operator notes')
+            run=board.start_run(q['id'],1,'snapshot-a')
+            board.finish_run(run['id'],{'outcome':'partial','answer':'A supported partial explanation.',
+                'claims':[],'results':[], 'limitations':['Some sources remain unread.'],
+                'messages':'Private diagnostic token '*5000,'provenance_aliases':{'evidence':{'e1':'canonical'}},
+                'coverage':{'read_passage_ids':['canonical'],'read_passages':1}})
+        state=service.state()
+        copies=[state['runs'][0],state['questions'][0]['latest_answer'],state['questions'][0]['answers'][0]]
+        for value in copies:
+            self.assertNotIn('messages',value)
+            self.assertNotIn('provenance_aliases',value)
+            self.assertNotIn('read_passage_ids',value['coverage'])
+            self.assertEqual(value['answer'],'A supported partial explanation.')
+            self.assertEqual(value['coverage']['read_passages'],1)
+        self.assertEqual(state['questions'][0]['notes'],'Keep operator notes')
+        with self.board() as board:
+            saved=board.get(q['id'])['latest_answer']
+            self.assertTrue(saved['messages'].startswith('Private diagnostic token'))
+            self.assertEqual(saved['provenance_aliases'],{'evidence':{'e1':'canonical'}})
+            self.assertEqual(saved['coverage']['read_passage_ids'],['canonical'])
+
     def test_live_ingest_guard_happens_before_search_or_model_initialization(self):
         service = self.service()
         self.server.get_status = lambda: {'pending': 1}

@@ -12,14 +12,13 @@ from ditnotes.research_progress import model_progress
 
 
 class ResearchTransportTests(unittest.IsolatedAsyncioTestCase):
-    async def test_research_3600_token_budget_reaches_mlx_chat_wire(self):
+    async def test_native_draft_and_writer_sampling_reach_mlx_chat_wire(self):
         requests = []
         original_client = httpx2.AsyncClient
 
         def respond(request):
             requests.append(request)
-            payload = {'outcome': 'not_supported', 'answer': 'No transcript evidence is available.',
-                       'claims': [], 'result_ids': []}
+            payload = {'outcome': 'not_supported', 'blocks': [{'text':'No transcript evidence is available.', 'evidence_ids':[], 'quotes':[]}]}
             return httpx2.Response(200, json={
                 'id': 'cpu-test', 'object': 'chat.completion', 'created': 1, 'model': 'local',
                 'choices': [{'index': 0, 'message': {'role': 'assistant', 'content': json.dumps(payload)}, 'finish_reason': 'stop'}],
@@ -47,19 +46,32 @@ class ResearchTransportTests(unittest.IsolatedAsyncioTestCase):
         request = requests[0]
         self.assertEqual(str(request.url), 'http://127.0.0.1:18983/v1/chat/completions')
         body = json.loads(request.content)
-        self.assertEqual(body['max_tokens'], 3600)
+        self.assertEqual(body['max_tokens'], 5500)
         self.assertNotIn('max_completion_tokens', body)
-        self.assertFalse(body['enable_thinking'])
+        self.assertTrue(body['enable_thinking'])
+        self.assertEqual(body['thinking_budget'],1536)
+        self.assertEqual(body['temperature'],1.0)
+        self.assertEqual(body['top_p'],0.95)
+        self.assertEqual(body['top_k'],20)
+        self.assertEqual(body['min_p'],0)
+        self.assertEqual(body['presence_penalty'],0)
+        self.assertEqual(body['repetition_penalty'],1)
+        self.assertEqual(body['reasoning_effort'],'medium')
         self.assertEqual(request.extensions['timeout']['read'], 600)
         self.assertFalse(body.get('tools'))
         self.assertEqual(body['response_format']['type'], 'json_schema')
         schema = body['response_format']['json_schema']['schema']
         self.assertNotIn('result_ids', schema['properties'])
-        self.assertEqual(schema['properties']['claims']['maxItems'], 10)
+        self.assertNotIn('answer', schema['properties'])
+        self.assertNotIn('claims', schema['properties'])
+        self.assertNotIn('draft', schema['properties'])
+        self.assertEqual(schema['properties']['blocks']['maxItems'], 10)
         self.assertEqual(schema['properties']['limitations']['maxItems'], 4)
         self.assertEqual(schema['properties']['followups']['maxItems'], 4)
-        self.assertEqual(schema['properties']['limitations']['items']['maxLength'], 400)
-        self.assertEqual(schema['$defs']['WriterResearchClaim']['properties']['quotes']['items']['maxLength'], 600)
+        self.assertNotIn('maxLength', schema['properties']['limitations']['items'])
+        self.assertNotIn('maxLength', schema['properties']['followups']['items'])
+        self.assertNotIn('maxLength', schema['$defs']['DraftBlock']['properties']['text'])
+        self.assertNotIn('maxLength', schema['$defs']['DraftBlock']['properties']['quotes']['items'])
 
     async def test_failed_local_generation_has_no_hidden_sdk_retry(self):
         from pydantic_ai.exceptions import ModelHTTPError

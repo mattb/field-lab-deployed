@@ -1,4 +1,5 @@
 """Model synthesis must expose distinct claims and playable source coverage."""
+import json
 import unittest
 from urllib.parse import unquote
 
@@ -195,6 +196,56 @@ class ResearchModelOutputTests(unittest.TestCase):
         previous = answer.model_dump()
         with self.assertRaises(ValueError): tools.validate_answer(answer)
         self.assertEqual(answer.model_dump(), previous)
+
+    def test_citation_retry_aggregates_exact_aliases_and_categories_without_mutation(self):
+        tools = self.tools()
+        tools.read_passages(['one:speech:1', 'two:speech:1'], 0)
+        one = tools.model_passage(tools.by_id['one:speech:1'])['id']
+        two = tools.model_passage(tools.by_id['two:speech:1'])['id']
+        unread = tools.model_passage(tools.by_id['two:speech:2'])['id']
+        answer = self.answer(tools)
+        answer.answer += f' [{one},{two},e999,{unread},e888]'
+        previous = answer.model_dump()
+        with self.assertRaisesRegex(ValueError, 'ungrounded source link') as caught:
+            tools.validate_model_answer(answer)
+        message = str(caught.exception)
+        issues = json.loads(message.split('Citation issues: ', 1)[1].split('. Remove unknown', 1)[0])
+        self.assertEqual(len(issues), 4)
+        self.assertEqual([r['marker'] for r in issues], [one, two, 'e999', unread])
+        self.assertEqual([r['category'] for r in issues], ['read_but_not_in_claim_union', 'read_but_not_in_claim_union', 'unknown', 'unread'])
+        self.assertIn('structured claim evidence_ids', message)
+        self.assertEqual(answer.model_dump(), previous)
+        self.assertLess(len(message), 1100)
+
+    def test_retry_distinguishes_this_claim_from_union_and_allows_exact_supported_fix(self):
+        tools = self.tools()
+        tools.read_passages(['one:speech:1'], 0)
+        extra = tools.model_passage(tools.by_id['one:speech:1'])['id']
+        answer = self.answer(tools)
+        answer.answer += f' [{extra}]'
+        with self.assertRaisesRegex(ValueError, 'read_but_not_in_claim_union'):
+            tools.validate_model_answer(answer)
+        answer.claims[0].evidence_ids.append(extra)
+        tools.validate_model_answer(answer)
+        self.assertIn('one:speech:1', answer.result_ids)
+        other = tools.model_passage(tools.by_id['two:speech:0'])['id']
+        answer.claims[0].text += f' [{other}]'
+        with self.assertRaisesRegex(ValueError, 'read_but_not_in_this_claim') as caught:
+            tools.validate_model_answer(answer)
+        self.assertIn('"location": "claim 0"', str(caught.exception))
+
+    def test_canonical_ids_are_replaced_by_short_aliases_in_retry_feedback(self):
+        tools = self.tools()
+        key = 'c'*32+':speech:99:0'
+        tools.by_id[key] = {**tools.by_id['one:speech:1'], 'id': key}
+        tools.pool[key] = tools.by_id[key]
+        tools.read_ids.add(key)
+        answer = self.answer(tools)
+        answer.answer += ' [Unclaimed](#shot='+key+'&t=9999)'
+        with self.assertRaises(ValueError) as caught:
+            tools.validate_model_answer(answer)
+        self.assertNotIn('c'*32, str(caught.exception))
+        self.assertIn('read_but_not_in_claim_union', str(caught.exception))
 
 
 if __name__ == '__main__':

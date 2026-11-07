@@ -173,13 +173,44 @@ class EvidenceTests(unittest.TestCase):
     def test_search_balances_sources_and_uses_raw_rerank_scores(self):
         t = fixture()
         t.call = lambda **_: {'rows': list(t.by_id.values())}
-        t.infer = lambda action, values, query='': {'vectors': [[1.0]+[0.0]*383]} if action == 'embed_text' else {'scores': [9, 8, 7, 1, -7, -8]}
+        t.infer = lambda action, values, query='': {'vectors': [[1.0]+[0.0]*383]} if action == 'embed_text' else {'scores': [9]*len(values)}
         value = t.search_interviews('uncertainty', sources_per_interview=1)
         aliases = t.provenance_aliases()['interviews']
         self.assertEqual({aliases[r['asset_id']] for r in value['results']}, {'one', 'two'})
         self.assertEqual(len(value['results']), 2)
         self.assertEqual(t.searched_interviews, {'one', 'two'})
         self.assertEqual(t.read_ids, set())
+
+    def test_native_depth_twelve_is_independent_of_return_count_and_keeps_quality_gate(self):
+        for count in (1, 2, 4):
+            for negative in (False, True):
+                with self.subTest(count=count, negative=negative):
+                    t = fixture()
+                    rows = [dict(t.speech['one'][0], id=f'one:speech:{i}', text=f'candidate {i}') for i in range(12)]
+                    t.speech['one'] = rows
+                    t.by_id.update({row['id']: row for row in rows})
+                    requests, batches = [], []
+                    def native(**values):
+                        requests.append(values)
+                        return {'rows': rows[:values['per_interview']]}
+                    def infer(action, values, query=''):
+                        if action == 'embed_text': return {'vectors': [[1.0]+[0.0]*383]}
+                        batches.append(list(values))
+                        return {'scores': [-7 if negative or text.count('candidate') > 1 else float(text.split()[-1]) for text in values]}
+                    t.call, t.infer = native, infer
+                    result = t.search_interviews('concept', ['one'], sources_per_interview=count)
+                    self.assertEqual(requests[0]['per_interview'], 12)
+                    self.assertEqual(requests[0]['asset_ids'], ['one'])
+                    self.assertEqual(len(batches), 1)
+                    self.assertTrue({r['text'] for r in rows} <= set(batches[0]))
+                    self.assertEqual(len(batches[0]), len(set(batches[0])))
+                    self.assertEqual(len(result['results']), 0 if negative else count)
+                    if not negative:
+                        first = result['results'][0]['id']
+                        self.assertEqual(t.provenance_aliases()['evidence'][first], 'one:speech:11')
+                        with self.assertRaisesRegex(ValueError, 'Read original'):
+                            t.open_sources([first])
+                    self.assertEqual(t.read_ids, set())
 
     def test_global_request_cannot_bypass_coverage_with_focused_scope(self):
         t = fixture()

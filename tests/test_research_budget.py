@@ -58,7 +58,7 @@ class ResearchReadBudgetTests(unittest.TestCase):
         t = self.tools(count=80, words=1)
         t.MAX_READ_PASSAGES = 40
         t.call = lambda **_: {'rows':[t.speech['source0'][0]]}
-        t.infer = lambda action, values, query='': {'vectors':[[1.0]+[0.0]*383]} if action=='embed_text' else {'scores':[1]}
+        t.infer = lambda action, values, query='': {'vectors':[[1.0]+[0.0]*383]} if action=='embed_text' else {'scores':[1]*len(values)}
         with patch.object(t, 'read_passages', wraps=t.read_passages) as reads:
             result = t.search_interviews('concept', ['source0'], read_context=True)
         reads.assert_not_called()
