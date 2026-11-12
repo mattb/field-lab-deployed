@@ -14,6 +14,7 @@ jobs:
       - run: python -m unittest discover -s tests -p 'test_bootstrap.py' -v
       - run: python -m unittest discover -s tests -p 'test_field.py' -v
       - run: python -m unittest discover -s tests -p 'test_source_distribution.py' -v
+      - run: python -m unittest discover -s tests -p 'test_backup*.py' -v
   model-routing:
     runs-on: ubuntu-latest
     steps:
@@ -68,6 +69,7 @@ jobs:
       - run: python -m unittest discover -s tests -p 'test_desktop.py' -v
       - run: python -m unittest discover -s tests -p 'test_bootstrap_paths.py' -v
       - run: python -m unittest discover -s tests -p 'test_volume_resolution.py' -v
+      - run: python -m unittest discover -s tests -p 'test_backup*.py' -v
       - run: swift build --jobs 2
         working-directory: native-progress
       - run: swift test --jobs 2

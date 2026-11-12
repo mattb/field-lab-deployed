@@ -98,7 +98,7 @@ def doctor(home):
 
 def main():
     p=argparse.ArgumentParser(description=__doc__);sub=p.add_subparsers(dest='command',required=True)
-    for name in ['install','update','activate','rollback','status','doctor','configure','configure-offshoot','start','stop','reconcile','ccc-status','reindex','verify-offshoot','desktop']:
+    for name in ['install','update','activate','rollback','status','doctor','configure','configure-offshoot','start','stop','reconcile','ccc-status','reindex','verify-offshoot','desktop','backup']:
         q=sub.add_parser(name);q.add_argument('--home',type=Path,default=manager.DEFAULT_HOME)
         if name in ['install','update']:q.add_argument('--source',type=Path);q.add_argument('--activate',action='store_true');q.add_argument('--offline',action='store_true')
         if name in ['install','update','activate','rollback']:q.add_argument('--offshoot-idle',action='store_true');q.add_argument('--interrupt-ai',action='store_true')
@@ -107,6 +107,7 @@ def main():
         if name=='reindex':q.add_argument('--project',type=Path,required=True);q.add_argument('--run',action='store_true');q.add_argument('--offshoot-idle',action='store_true')
         if name=='configure':q.add_argument('--volume',required=True);q.add_argument('--ingest-folder',default='Ingests');q.add_argument('--port',type=int,default=8766)
         if name=='configure-offshoot':q.add_argument('--offshoot-idle',action='store_true')
+        if name=='backup':q.add_argument('backup_args',nargs=argparse.REMAINDER)
     a=p.parse_args();a.home=a.home.expanduser().resolve()
     try:
         if a.command in ['install','update']:
@@ -140,6 +141,12 @@ def main():
             release=current(a.home);run([release/'.venv/bin/python',release/'deploy/offshoot_status.py']);result={'changes_made':False}
         elif a.command=='ccc-status':
             release=current(a.home);run([release/'.venv/bin/python',release/'deploy/ccc.py']);result={'changed':False}
+        elif a.command=='backup':
+            release=current(a.home)
+            # Optional rotation starts no task until run/button. Task definitions
+            # are never changed; explicit per-project registration is separate.
+            run([release/'.venv/bin/python',release/'deploy/backup.py',*a.backup_args])
+            result={'command':'backup'}
         else:
             current(a.home);save_launcher(a.home)
             run([a.home/'run',a.command]);result={'command':a.command}

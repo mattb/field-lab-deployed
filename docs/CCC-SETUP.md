@@ -2,6 +2,8 @@
 
 CCC is optional until a second physical destination is chosen. The installer leaves existing CCC tasks unchanged. This guide is for Codex operating CCC on the field Mac after the operator identifies drive 1 and drive 2; it is not a claim that a task was configured or tested there.
 
+This document describes a single-destination mirror. When backup drives are smaller than the primary, use [backup rotation](BACKUP-ROTATION.md): separate APFS clone sources, new dedicated tasks per drive, registered endpoints/guards and resumable whole-card allocation. Its partitioned archival behavior differs from the mirror's Finder-move propagation below. Installing either workflow never changes existing tasks automatically.
+
 ## Supported automation and its boundary
 
 CCC's documented command-line interface can inspect task UUIDs/status/history and start, stop or watch an existing task. Its documented task-transfer route is Export Task(s) in CCC, then opening the exported `.ccctask` on the other Mac. Neither is a documented general task-creation/configuration CLI. Use the UI for task creation and setting endpoints; do not synthesize `.ccctask` XML, edit private preference keys or decrypt/modify CCC databases. An imported task still needs its actual machine-specific source and destination checked. [CLI manual](https://support.bombich.com/hc/en-us/articles/20686443072535-Using-the-ccc-Command-Line-Tool-to-Start-Stop-and-Monitor-CCC-Backup-Tasks), [task import/export](https://support.bombich.com/hc/en-us/articles/20686444541975-Task-Organization).

@@ -15,6 +15,8 @@ Keep separate results for software tests, local model inference, UI persistence,
 
 If using a MacDroid/MTP camera source, also run the [adapter acceptance checks](MACDROID-INGEST.md#acceptance-before-field-use), including an uncached interrupted download and receipt/queue verification. A card-reader test does not validate this path, and a source reread through MacDroid may use its cache.
 
+For explicitly enabled smaller-drive backup rotation, run the [rotation acceptance](BACKUP-ROTATION.md#acceptance-and-disaster-coverage) using NEW disposable CCC tasks, two independent backup drives and a secured per-task guard. Check whole-card allocation, a full-drive swap, real CCC verification and independent manager hashes, metadata restore, interrupted manager/CCC recovery and preservation of all existing tasks. Automated SIGKILL/fake-CCC tests do not replace this hardware test.
+
 ## Failure scenarios
 
 The automated deployment suite must exercise: interrupted staging, partial/tampered download, archive path escape, missing offline files, failed preparation, concurrent update attempts, source/config symlink hazards, activation failure, rollback and preservation of existing `current`, shared data and project metadata. Run in temporary directories. A passing suite does not imply a power-loss test on the destination filesystem.

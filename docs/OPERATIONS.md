@@ -97,6 +97,8 @@ CCC remains untouched by these install/update instructions. To add it later, cho
 
 Verify the second copy and check playable media before authorizing card reuse. A future Finder reorganization of drive 1 requires reconciliation and another CCC run; it is not propagated by OffShoot itself.
 
+If the primary exceeds the size of each secondary drive, use the separately requested [backup rotation manager](BACKUP-ROTATION.md) rather than a whole-project mirror task. `backup ui` is opt-in, uses registered dedicated CCC tasks and APFS clone projections, and preserves the current ingest hierarchy. Its checksummed project ledger and spool survive code updates. Do not change existing CCC tasks during installation/update. Partitioned archive paths remain stable after a set closes; the whole-project Finder-mirror behavior above does not apply to rotation. Stop the rotation UI before a release switch; unknown CCC attempts reconcile on restart without stopping CCC.
+
 ## Interrupted work and recovery
 
 After a power loss or interruption, mount the configured drive and start the service. It reconciles sealed AI outputs with work still required. Completed clips are reused; pending clips resume. Unknown ingest folders need valid OffShoot verification evidence. Do not fabricate a success receipt to bypass that requirement.
