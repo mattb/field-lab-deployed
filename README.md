@@ -15,7 +15,7 @@ This is an early deployment release. Supported target: **Apple Silicon, macOS 27
 Paste this single prompt into Codex on the Mac you want to set up:
 
 ```text
-Install the field-lab Codex skill from https://github.com/mattb/field-lab-deployed/tree/v0.1.0-alpha.7/.agents/skills/field-lab, then read its SKILL.md directly and start the first-time install process for that same release on this Mac. Continue in this turn rather than waiting for automatic skill discovery. OffShoot Pro and CCC are already installed.
+Install the field-lab Codex skill from https://github.com/mattb/field-lab-deployed/tree/v0.1.0-alpha.6/.agents/skills/field-lab, then read its SKILL.md directly and start the first-time install process for that same release on this Mac. Continue in this turn rather than waiting for automatic skill discovery. OffShoot Pro and CCC are already installed.
 ```
 
 This pins both the skill and application to the same tested release. Codex installs the skill, finds or clones the source checkout, checks the Mac, prepares the local software/models, and guides the drive configuration and acceptance tests. It asks for the ingest destination when the actual drive cannot be established from your session. No API key is needed. CCC task setup follows separately after the second physical drive is chosen.
@@ -36,7 +36,7 @@ Do the [smoke test](docs/SMOKE-TEST.md) on your own disposable footage and a tes
 
 USB cameras that appear in Image Capture instead of as disks can optionally use [MacDroid as an OffShoot folder source](docs/MACDROID-INGEST.md). A MISSION 1 PRO folder was accepted and enumerated; a full verified transfer through this adapter is still pending, and Skydio X10 compatibility is untested. MacDroid is separately installed/licensed and may cache source data. See the procedure for the verification boundary and camera-specific acceptance checks.
 
-For a primary drive larger than the backup drives, optional [backup rotation](docs/BACKUP-ROTATION.md) provides a local **Back up pending footage** button, whole-card allocation, drive-swap prompts, atomic recovery and independent destination hashing. APFS clone sources preserve your current ingest hierarchy. Only explicitly registered NEW dedicated CCC tasks can be started; existing CCC tasks/settings stay untouched. Setup requires per-drive task/guard acceptance on the actual Mac. This is a partitioned archive; arbitrary later Finder moves are not automatically mirrored across offline drives. See [alpha.7 validation and limits](docs/RELEASE-v0.1.0-alpha.7.md).
+For a primary drive larger than the backup drives, optional [backup rotation](docs/BACKUP-ROTATION.md) provides a local **Back up pending footage** button, whole-card allocation, drive-swap prompts, atomic recovery and independent destination hashing. APFS clone sources preserve your current ingest hierarchy. Only explicitly registered NEW dedicated CCC tasks can be started; existing CCC tasks/settings stay untouched. Setup requires per-drive task/guard acceptance on the actual Mac. This is a partitioned archive; arbitrary later Finder moves are not automatically mirrored across offline drives. See [work-in-progress validation and limits](docs/RELEASE-v0.1.0-alpha.7.md).
 
 ## Development
 

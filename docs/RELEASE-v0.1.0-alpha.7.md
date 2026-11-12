@@ -1,4 +1,6 @@
-# v0.1.0-alpha.7 — smaller-drive backup rotation
+# Unreleased draft — smaller-drive backup rotation
+
+Work in progress. No release or tag is published for this change. Publication requires an explicit request from the maintainer.
 
 Opt-in backup rotation adds a local **Back up pending footage** interface and managed CLI. It discovers accepted verified OffShoot queue entries, allocates whole cards across registered backup drives with a 10% reserve, and preserves the current date/card ingest hierarchy through fixed APFS copy-on-write source projections. CCC starts only explicitly registered dedicated tasks; independent SHA-256 destination verification gates completion.
 
