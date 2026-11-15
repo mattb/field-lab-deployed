@@ -1,0 +1,9 @@
+{
+  "name": "field-lab-adobe-packager",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Maintainer-only pinned Adobe SDK CCX packager; never used by field inference",
+  "dependencies": {
+    "@adobe/uxp-devtools-core": "1.2.0"
+  }
+}

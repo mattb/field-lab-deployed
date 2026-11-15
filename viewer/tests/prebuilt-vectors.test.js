@@ -19,3 +19,16 @@ test('actual worker consumes prebuilt vectors without content inference requests
  try{await import('../src/search.worker.js');self.onmessage({data:{type:'init',documents:docs.map(d=>({...d,contentId:'c',assetId:'a',assetKind:'video',path:'a.mp4',title:'',text:'test',seconds:1})),readiness,catalogRevision:'1',projectId:'test'}});await ready;assert.deepEqual(calls,['/api/search-vectors']);}
  finally{globalThis.fetch=oldFetch;globalThis.self=oldSelf;}
 });
+
+test('static browser vectors reject MLX snapshots and require exact browser and catalog revisions',async()=>{
+ const {selectStaticPrebuilt,STATIC_VECTOR_FORMAT}=await import('../src/prebuilt-vectors.js');
+ const ready={models:{embeddings:{ready:true,revision:'onnx-text'},clip:{ready:true,revision:'onnx-clip'},reranker:{ready:true,revision:'onnx-rerank'}}};
+ const snapshot={...payload,backend:'wasm',format:STATIC_VECTOR_FORMAT,revision:{text:'onnx-text',clip:'onnx-clip',reranker:'onnx-rerank'}};
+ assert.equal(selectStaticPrebuilt(snapshot,ready,docs,'1').text.size,1);
+ assert.equal(selectStaticPrebuilt(snapshot,ready,docs,'1').image.size,1);
+ for(const bad of [{...snapshot,backend:'mlx'},{...snapshot,format:'other'},{...snapshot,catalog_revision:'2'},{...snapshot,revision:{...snapshot.revision,text:'mlx-same-width'}},{...snapshot,revision:{...snapshot.revision,reranker:'other'}}]){
+  const selected=selectStaticPrebuilt(bad,ready,docs,'1');assert.equal(selected.text.size,0);
+ }
+ assert.equal(selectStaticPrebuilt(snapshot,ready,docs,null).text.size,0);
+ assert.equal(selectStaticPrebuilt(snapshot,readiness,docs,'1').text.size,0);
+});

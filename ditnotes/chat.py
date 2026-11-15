@@ -93,7 +93,7 @@ def make_agent():
         except ValueError as error:raise ModelRetry(str(error)) from error
     @agent.tool
     def find_person(ctx:RunContext[FootageTools],name:str)->dict:
-        """Resolve an operator-assigned name into face and voice identities, including explicit links."""
+        """Resolve a named unified Person and their reviewed visual/audio evidence groups. Audio evidence alone never proves visibility."""
         return invoke(ctx.deps.person,name)
     @agent.tool
     def search_person(ctx:RunContext[FootageTools],name:str):

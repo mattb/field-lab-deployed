@@ -56,7 +56,9 @@ class FootageTools:
         vector=self.infer('embed_clip_text' if mode=='images' else 'embed_text',[query])['vectors'][0]
         packet=self.call(action='search',query=query,mode=mode,filters=filters,vector=vector)
         if mode=='text' and packet['rows']:
-            rows=packet['rows'][:16];scores=self.infer('rerank',[r['text'] if r['kind']!='file' else r['title']+' '+r['path'] for r in rows],query)['scores']
+            rows=packet['rows'][:160];scores=[]
+            for offset in range(0,len(rows),40):
+                scores.extend(self.infer('rerank',[r['text'] if r['kind']!='file' else r['title']+' '+r['path'] for r in rows[offset:offset+40]],query)['scores'])
             rows=[dict(r,rerankScore=score) for r,score in zip(rows,scores)]
             packet=self.call(action='gate',rows=rows,lexical=packet['lexical'],query=query)
         result=[];seen=set()
@@ -69,9 +71,10 @@ class FootageTools:
     def person(self,name):
         self.notify('Resolving person',{'name':name})
         state=self.refresh_identity();needle=name.strip().casefold()
-        return {'voices':[{'id':p['id'],'name':p['name']} for p in state['people'] if p.get('name') and needle in p['name'].casefold()],
+        return {'people':[{'id':p['id'],'name':p['name'],'name_conflict':p['name_conflict'],'face_ids':[m['evidence_id'] for m in p['members'] if m['modality']=='face'],'voice_ids':[m['evidence_id'] for m in p['members'] if m['modality']=='voice']} for p in self.server.metadata.people_review()['people'] if p.get('name') and needle in p['name'].casefold()],
+                'voices':[{'id':p['id'],'name':p['name']} for p in state['people'] if p.get('name') and needle in p['name'].casefold()],
                 'faces':[{'id':p['id'],'name':p['name'],'name_source':'operator_face_group_label','voice_link':p.get('voice_link')} for p in state['faces'] if p.get('name') and needle in p['name'].casefold()],
-                'interpretation':'A face label names the visually detected face group. Voice identity is separate and requires an explicit operator link. This is not an AI visual caption or an ordinary clip note.'}
+                'interpretation':'A unified Person owns reviewed image and audio evidence. These legacy face and voice IDs are evidence groups attached to that Person, not separate named people. Visible face matches prove sampled visual appearances; audio evidence only proves the person was heard. A name-conflict record has no confirmed name until reviewed.'}
     def search_person(self,name):
         identity=self.person(name);rows=[]
         for face in identity['faces']:

@@ -156,6 +156,8 @@ class _ProjectServer(ThreadingHTTPServer):
         self.search_backend=SearchBackend(self.tool_root,self.resolve_image,warm_start=True)
         super().__init__(('127.0.0.1', port), _Handler)
         self.metadata=MetadataAPI(self)
+        from .premiere_bridge import PremiereJournalWorker
+        self.premiere_worker=PremiereJournalWorker(self.project,self.catalog.read).start()
         self.chat_init_lock=threading.Lock()
 
     def resolve_image(self,url):
@@ -170,6 +172,7 @@ class _ProjectServer(ThreadingHTTPServer):
         # The daemon stop command bounds the whole shutdown and can terminate its
         # process group; service.lock remains held until all writers are done.
         super().server_close()
+        if hasattr(self,'premiere_worker'):self.premiere_worker.close()
         if hasattr(self,'chat'):self.chat.close()
         if hasattr(self,'metadata'):self.metadata.close()
         if hasattr(self,'search_backend'):self.search_backend.close()
@@ -184,7 +187,8 @@ class _Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         from .chat import handle_chat_post
-        if not handle_chat_post(self) and not handle_post(self):serve_model_request(self,self.server.search_backend)
+        from .premiere_http import handle as handle_premiere
+        if not handle_premiere(self) and not handle_chat_post(self) and not handle_post(self):serve_model_request(self,self.server.search_backend)
 
     def do_GET(self):
         self._serve(False)
@@ -210,6 +214,10 @@ class _Handler(BaseHTTPRequestHandler):
                 self.send_error(403, 'Loopback host required')
                 return
             path = _decode_path(self.path)
+            if path.startswith('/api/premiere/'):
+                from .premiere_http import handle as handle_premiere
+                handle_premiere(self, head)
+                return
             if path == '/api/chat':
                 from .chat import get_chat
                 from urllib.parse import parse_qs,urlsplit
@@ -217,8 +225,20 @@ class _Handler(BaseHTTPRequestHandler):
             if path == '/api/catalog':
                 self._json(self.server.metadata.catalog(), head)
                 return
+            if path == '/api/people/review':
+                self._json(self.server.metadata.people_review(),head);return
+            if path == '/api/browse':
+                self._json(self.server.metadata.browse(),head);return
             if path in ('/api/annotations-state','/api/metadata'):
                 self._json(self.server.metadata.state(),head);return
+            if path=='/api/asset-tags':
+                from urllib.parse import parse_qs,urlsplit
+                query=parse_qs(urlsplit(self.path).query)
+                try:
+                    if set(query)!={'content_id'} or len(query['content_id'])!=1:raise ValueError('One content_id is required')
+                    self._json(self.server.metadata.asset_tags(query['content_id'][0]),head)
+                except ValueError as error:self._json({'error':str(error)},head,400)
+                return
             if path=='/api/face/review':
                 self._json(self.server.metadata.face_review(),head);return
             if path == '/api/status':

@@ -242,11 +242,26 @@ def stopped_service(shared):
         except BlockingIOError: raise RuntimeError('AI service is running; stop it cleanly before switching releases') from None
         yield
 
+def check_data_capabilities(current, candidate):
+    """Older writers must not mask edits in an additive newer identity model."""
+    def capabilities(release):
+        path = release / 'deploy/data-capabilities.json' if release else None
+        if not path or not path.is_file(): return {}
+        if path.is_symlink(): raise ValueError('Data capability declaration cannot be a symlink')
+        value = json.loads(path.read_text())
+        if not isinstance(value, dict) or any(type(v) is not int or v < 0 for v in value.values()): raise ValueError('Invalid data capabilities')
+        return value
+    previous, supported = capabilities(current), capabilities(candidate)
+    for key, version in previous.items():
+        if supported.get(key, 0) < version:
+            raise ValueError('Candidate cannot safely write '+key+' metadata. Keep the current release or use a compatible newer build; do not restore an old database over field edits.')
+
 def activate(home, release_id=None, rollback=False, fault=None, checker=offline_check):
     with locked(home) as (home, releases, shared):
         current = pointer(home, 'current'); previous = pointer(home, 'previous')
         release = previous if rollback else release_path(releases, release_id)
         if release is None: raise ValueError('There is no previous release to roll back to')
+        check_data_capabilities(current, release)
         validate_shared(release, shared); verify_bootstrap(release)
         ready_path = release / '.field-lab-ready.json'
         if ready_path.is_symlink(): raise ValueError('Ready receipt cannot be a symlink')

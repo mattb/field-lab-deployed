@@ -16,7 +16,7 @@ export function preserveMetadataMatches(gated,lexical,documents,query){
  if(!wanted)return [...rows.values()];
  for(const row of lexical){const d=byId.get(row.id);if(!d)continue;
   const tags=d.source==='operator'?d.provenance?.metadata?.tags||[]:d.source==='accepted_inheritance'?d.provenance?.metadata?.suggested_metadata?.tags||[]:[];
-  const labels=[...(d.personNames||[]),...(d.faceNames||[]),...(d.personIds||[]),...(d.faceIds||[]),...(Array.isArray(tags)?tags:[tags])];
+  const labels=[...(d.personNames||[]),...(d.faceNames||[]),...(d.personIds||[]),...(d.faceIds||[]),...(Array.isArray(tags)?tags:[tags]),...(['operator_tag','asset_tag'].includes(d.source)?d.tagNames||[]:[])];
   if(labels.some(label=>normalize(label)===wanted)&&!rows.has(row.id))rows.set(row.id,{...row,authoritativeMetadata:true});
  }
  return [...rows.values()];

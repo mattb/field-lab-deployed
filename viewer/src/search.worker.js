@@ -1,4 +1,5 @@
-import {selectPrebuilt} from './prebuilt-vectors.js';
+import {mergeGlobalResults} from './browse.js';
+import {selectPrebuilt,selectStaticPrebuilt} from './prebuilt-vectors.js';
 import {gateReranked,gateImages,preserveMetadataMatches} from './search-quality.js';
 import {createLocalInference} from './local-inference.js';
 import {createIndexes,addTextVector,addImageVector,searchText,searchImages} from './search-index.js';
@@ -14,7 +15,7 @@ let revisions={},embeddedCount=0,imageCount=0,localInference=null;
 const queryCache=new Map(),send=(type,data)=>self.postMessage({type,...data}),pause=()=>new Promise(r=>setTimeout(r,0));
 const status=(phase,label,extra={})=>send('status',{phase,label,done:cursor+imageCursor,total:embeddingDocs.length+imageDocs.length,cacheHits,...extra});
 function normalized(data){let length=0;for(const x of data)length+=x*x;length=Math.sqrt(length)||1;return Float32Array.from(data,x=>x/length);}
-function emitResults(job,rows,stage,started){if(job.id!==latest)return;send('results',{id:job.id,stage,results:rows.map(r=>({...byId.get(r.id),...r})),elapsed:performance.now()-started,partial:job.mode==='images'?imageCursor<imageDocs.length:cursor<embeddingDocs.length});}
+function emitResults(job,rows,stage,started){if(job.id!==latest)return;if(job.global){job.global[job.mode==='images'?'images':'text']=rows;rows=mergeGlobalResults(job.global.text,job.global.images);stage='all';}send('results',{id:job.id,stage,results:rows.map(r=>({...byId.get(r.id),...r})),elapsed:performance.now()-started,partial:job.global?cursor<embeddingDocs.length||imageCursor<imageDocs.length:job.mode==='images'?imageCursor<imageDocs.length:cursor<embeddingDocs.length});}
 async function cached(key,size){if(!cacheEnabled)return null;try{const v=await cacheGet(key);if(v?.vector?.length===size){cacheHits++;return Float32Array.from(v.vector);}}catch{cacheEnabled=false;send('warning',{message:'The search index cannot be saved in this browser. It still works for this session.'});}return null;}
 async function persist(key,vector){if(cacheEnabled)try{await cachePut(key,{vector:Array.from(vector),saved:Date.now()});}catch{cacheEnabled=false;}}
 async function initialize(message){
@@ -33,6 +34,15 @@ async function initialize(message){
   embed=true;reranker=true;clipText=true;clipVision=true;
   send('capabilities',{meaning:true,reranking:true,images:true,backend:'mlx'});schedule();return;
  }
+ if(message.staticVectorsUrl){
+  if(!safeLocalUrl(message.staticVectorsUrl))throw Error('Static vectors must use a same-origin path');
+  try{const response=await fetch(message.staticVectorsUrl);if(!response.ok)throw Error(`Search vectors returned ${response.status}`);const payload=await response.json();if(mine!==generation)return;prebuilt=selectStaticPrebuilt(payload,readiness,docs,message.catalogRevision);
+   for(const doc of embeddingDocs){const vector=prebuilt.text.get(doc.id);if(vector){addTextVector(indexes.text,doc,vector);embeddedCount++;}}
+   for(const doc of imageDocs){const vector=prebuilt.image.get(doc.id);if(vector){addImageVector(indexes.images,doc,vector);imageCount++;}}
+   if(embeddedCount===embeddingDocs.length&&imageCount===imageDocs.length){cursor=embeddingDocs.length;imageCursor=imageDocs.length;}else{indexes=createIndexes(docs);embeddedCount=0;imageCount=0;}
+   if(!prebuilt.text.size&&embeddingDocs.length)send('warning',{message:'Static vector snapshot is incompatible; rebuilding search locally.'});
+  }catch(e){send('warning',{message:`Prepared search vectors unavailable: ${e.message}`});}
+ }
  if(!isReady('embeddings')&&!isReady('clip')){announcedReady=true;cursor=embeddingDocs.length;imageCursor=imageDocs.length;status('lexical-only','Keyword search ready; models unavailable',{reason:'missing-models'});return;}
  working=true;status('loading','Loading search models…');
  try{
@@ -43,7 +53,8 @@ async function initialize(message){
   if(isReady('reranker')&&embed)try{[rerankTokenizer,reranker]=await Promise.all([t.AutoTokenizer.from_pretrained('reranker',{local_files_only:true}),t.AutoModelForSequenceClassification.from_pretrained('reranker',{dtype:'q8',device:'wasm',local_files_only:true})]);}catch(e){send('warning',{message:`Relevance reranking unavailable: ${e.message}. Text and meaning search still work.`});}
   if(isReady('clip'))try{
    status('loading','Loading image model…');
-   [clipTokenizer,clipProcessor,clipText,clipVision]=await Promise.all([t.AutoTokenizer.from_pretrained('clip',{local_files_only:true}),t.AutoProcessor.from_pretrained('clip',{local_files_only:true}),t.CLIPTextModelWithProjection.from_pretrained('clip',{dtype:'q8',device:'wasm',local_files_only:true}),t.CLIPVisionModelWithProjection.from_pretrained('clip',{dtype:'q8',device:'wasm',local_files_only:true})]);
+   [clipTokenizer,clipText]=await Promise.all([t.AutoTokenizer.from_pretrained('clip',{local_files_only:true}),t.CLIPTextModelWithProjection.from_pretrained('clip',{dtype:'q8',device:'wasm',local_files_only:true})]);
+   if(imageCursor===imageDocs.length){clipVision=true;}else [clipProcessor,clipVision]=await Promise.all([t.AutoProcessor.from_pretrained('clip',{local_files_only:true}),t.CLIPVisionModelWithProjection.from_pretrained('clip',{dtype:'q8',device:'wasm',local_files_only:true})]);
   }catch(e){clipText=null;clipVision=null;imageCursor=imageDocs.length;send('warning',{message:`Image search unavailable: ${e.message}. Your stills remain browsable.`});}else imageCursor=imageDocs.length;
   send('capabilities',{meaning:!!embed,reranking:!!reranker,images:!!clipVision,backend:'wasm'});
  }catch(e){embed=null;clipVision=null;clipText=null;cursor=embeddingDocs.length;imageCursor=imageDocs.length;status('lexical-only','Text search ready · model runtime unavailable',{reason:e.message});}
@@ -51,6 +62,7 @@ async function initialize(message){
 }
 async function queryVector(job,image=false){const key=`${image?'clip':'text'}:${job.query}`;let vector=queryCache.get(key);if(!vector){if(localInference){vector=(await (image?localInference.clipText([job.query]):localInference.text([job.query])))[0];}else if(image){const inputs=clipTokenizer(job.query,{padding:true,truncation:true,max_length:77});const {text_embeds}=await clipText(inputs);vector=normalized(text_embeds.data);}else{const t=await embed(job.query,{pooling:'mean',normalize:true,truncation:true});vector=Float32Array.from(t.data);}queryCache.set(key,vector);if(queryCache.size>40)queryCache.delete(queryCache.keys().next().value);}return vector;}
 async function runQuery(job){
+ if(job.mode==='all'){const global={text:[],images:[]};await runQuery({...job,mode:'text',global});if(job.id===latest)await runQuery({...job,mode:'images',global});return;}
  const started=performance.now();
  if(job.mode==='images'){
   if(!clipText||imageCount===0){emitResults(job,[],'images-pending',started);return;}
@@ -62,7 +74,7 @@ async function runQuery(job){
   const rows=await searchText(indexes.text,job.query,job.filters,vector);
   if(job.id!==latest)return;
   if(!rows.length){emitResults(job,[],'reranked',started);return;}
-  const candidates=rows.slice(0,16),texts=candidates.map(r=>{const d=byId.get(r.id);return [d.kind==='file'?`${d.title} ${d.path}`:d.text,...(d.personNames||[]),...(d.faceNames||[]),...(d.personIds||[]),...(d.faceIds||[])].join(' ');});
+  const candidates=rows.slice(0,localInference?160:40),texts=candidates.map(r=>{const d=byId.get(r.id);return d.kind==='file'?`${d.title} ${d.path}`:d.text;});
   let scores;if(localInference){scores=await localInference.rerank(job.query,texts);}else{const inputs=rerankTokenizer(texts.map(()=>job.query),{text_pair:texts,padding:true,truncation:true,max_length:256});const {logits}=await reranker(inputs);scores=logits.data;}if(job.id!==latest)return;
   candidates.forEach((r,i)=>r.rerankScore=Number(scores[i]));emitResults(job,preserveMetadataMatches(gateReranked(candidates,MIN_RERANK_LOGIT),lex,docs,job.query),'reranked',started);
  }catch(e){send('warning',{message:`Meaning search paused: ${e.message}. Showing keyword matches.`});emitResults(job,lex,'text',started);}
@@ -92,7 +104,7 @@ async function schedule(){
 self.onmessage=event=>{
  const m=event.data;if(m.type==='init'){initialize(m).catch(e=>status('lexical-only','Keyword search ready',{reason:e.message}));return;}if(m.type==='cancel'){latest=m.id;pending=null;return;}
  if(m.type==='query'&&indexes){latest=m.id;const job={id:m.id,query:m.query,filters:m.filters||{},mode:m.mode||'text'},started=performance.now();
-  if(job.mode!=='images'&&!reranker)searchText(indexes.text,job.query,job.filters).then(rows=>emitResults(job,rows,'text',started));
+  if(job.mode!=='images'&&!reranker)searchText(indexes.text,job.query,job.filters).then(rows=>emitResults(job.mode==='all'?{...job,global:{text:[],images:[]},mode:'text'}:job,rows,'text',started));
   else if(job.mode==='images')emitResults(job,[],'images-pending',started);
   pending=job;schedule();
  }

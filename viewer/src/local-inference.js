@@ -15,6 +15,6 @@ export function createLocalInference(fetcher=fetch){
   text:texts=>vectors('embed_text',{texts},texts.length,384),
   clipText:texts=>vectors('embed_clip_text',{texts},texts.length,512),
   images:urls=>{if(urls.some(url=>typeof url!=='string'||!url.startsWith('/notes/')||url.startsWith('//')))throw new Error('Only local note images can be embedded');return vectors('embed_images',{urls},urls.length,512);},
-  async rerank(query,texts){const {scores}=await request('rerank',{query,texts});if(!Array.isArray(scores)||scores.length!==texts.length||scores.some(s=>!Number.isFinite(s)))throw new Error('Invalid reranking scores');return scores;}
+  async rerank(query,texts){const all=[];for(let offset=0;offset<texts.length;offset+=40){const batch=texts.slice(offset,offset+40);const {scores}=await request('rerank',{query,texts:batch});if(!Array.isArray(scores)||scores.length!==batch.length||scores.some(s=>!Number.isFinite(s)))throw new Error('Invalid reranking scores');all.push(...scores);}return all;}
  };
 }

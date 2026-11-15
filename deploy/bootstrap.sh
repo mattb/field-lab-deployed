@@ -9,6 +9,7 @@ Field Lab: bash deploy/bootstrap.sh COMMAND [OPTIONS]
   configure --volume MOUNT [--ingest-folder Ingests] [--port 8766]
   configure-offshoot --offshoot-idle | verify-offshoot | ccc-status
   reindex --project PROJECT [--run --offshoot-idle]
+  premiere [--home PATH] stage|package|attach-ccx|install|reconcile|verify-runtime|status [OPTIONS]
   desktop [--desktop PATH]
   backup [--home PATH] init|prepare-set|add-drive|guard|status|run|ui [BACKUP_OPTIONS]
   status | doctor | start | stop | reconcile | rollback --offshoot-idle

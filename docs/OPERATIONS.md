@@ -44,6 +44,10 @@ The optional [Desktop apps](DESKTOP.md) provide double-click entry points for in
 
 For Image Capture/MTP devices without a mounted filesystem, see [MacDroid ingestion](MACDROID-INGEST.md). The adapter supplies an optional folder source to OffShoot; the verified physical destination, receipt gate, AI service and separately configured CCC remain the same. Native CloudStorage caching limits claims about independent camera rereading. This is not an automatic camera importer or a substitute for the adapter's physical acceptance test.
 
+## Premiere plugin
+
+For the separately requested native Premiere bridge, follow [install/update packaging](PREMIERE-INSTALL.md). `bash deploy/bootstrap.sh premiere ...` stages sealed runtime candidates, accepts Adobe-produced CCX installers, invokes Adobe UPIA while Premiere is closed, and reconciles interrupted outcomes. Installed Adobe registration and fresh native workflow verification are separate gates. This does not change OffShoot or CCC settings. Plugin state/artifacts live under application `shared/premiere/`; project journals remain beside media.
+
 ## What persists
 
 The source checkout can be anywhere outside a media project. The installed application uses this layout by default:
@@ -116,3 +120,6 @@ Maintain source in Git and promote a reviewed commit as a release/tag only after
 Tests on a development Mac establish only their recorded coverage. A fresh-machine install and first physical card transfer still need validation on the field laptop.
 
 `status` shows deployment pointers and provenance. For live queue/backlog errors use the running local `/api/status` or `shared/runtime/status.json`; a saved status file can be stale after an interrupted process.
+
+
+Unified People updates: follow [People migration and review](PEOPLE.md). Before first access, the application backs up the SQLite registry and verifies that migration leaves legacy evidence unchanged. Preserve the receipt; never restore an old database over later edits. Candidate activation must pass the data-capability downgrade guard. Validate naming, audio playback, visible/heard appearances and a saved/reopened review decision on a disposable project.

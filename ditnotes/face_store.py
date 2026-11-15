@@ -54,6 +54,11 @@ class FaceStoreMixin:
         for row in self.db.execute('SELECT * FROM faces ORDER BY created_at,id'):
             item=dict(row,identity_basis='visual_face');link=self.db.execute('SELECT person_id,reason,linked_at FROM face_voice_links WHERE face_id=?',(self.canonical_face(row['id']),)).fetchone()
             item['voice_link']={'person_id':self.canonical_person(link['person_id']),'reason':link['reason'],'linked_at':link['linked_at'],'source':'operator'} if link else None
+            identity=self.unified_identity('face',self.canonical_face(row['id']))
+            if identity:
+                item.update(legacy_name=item['name'],name=identity['name'],unified_person_id=identity['id'],name_conflict=bool(identity['name_conflict']))
+                links=[{'person_id':r['evidence_id'],'unified_person_id':identity['id'],'source':'reviewed_person_membership'} for r in self.db.execute("SELECT e.evidence_id FROM unified_evidence e JOIN people v ON v.id=e.evidence_id WHERE e.modality='voice' AND e.person_id=? AND v.merged_into IS NULL ORDER BY e.evidence_id",(identity['id'],))]
+                item['voice_links']=links;item['voice_link']=links[0] if links else None
             result.append(item)
         return result
     def _refresh_face_profiles(self,face_id):
@@ -138,6 +143,8 @@ class FaceStoreMixin:
         rows=self.db.execute('SELECT * FROM face_observations'+(' WHERE content_id=?' if content_id else '')+' ORDER BY seconds,id',((content_id,) if content_id else ()))
         return [self._face_observation(row) for row in rows]
     def name_face(self,face_id,name,*,sync_linked=True):
+        identity=self.unified_identity('face',self.canonical_face(face_id))
+        if identity:return self.rename_unified_person(identity['id'],name)
         from .project_store import _text
         name=_text(name,200) if name is not None else None
         with self._transaction():
@@ -156,6 +163,10 @@ class FaceStoreMixin:
             face=self.canonical_face(r['face_id']);old=self.db.execute('SELECT name FROM faces WHERE id=?',(face,)).fetchone()[0]
             if old!=name:self.db.execute('UPDATE faces SET name=? WHERE id=?',(name,face));self._audit('linked_identity_named',{'face_id':face,'name':name,'old_name':old})
     def link_face_voice(self,face_id,person_id,reason):
+        face_identity=self.unified_identity('face',self.canonical_face(face_id));voice_identity=self.unified_identity('voice',self.canonical_person(person_id))
+        if face_identity and voice_identity:
+            if face_identity['id']==voice_identity['id']:return
+            return self.merge_unified_people(face_identity['id'],voice_identity['id'],reason)
         from .project_store import _text
         reason=_text(reason,1000)
         with self._transaction():
@@ -169,6 +180,10 @@ class FaceStoreMixin:
             self.db.execute('DELETE FROM av_link_feedback WHERE face_id=? AND person_id=?',(face_id,person_id))
             self._audit('face_voice_linked',{'face_id':face_id,'person_id':person_id,'previous_person_id':old[0] if old else None,'reason':reason,'source':'operator'})
     def unlink_face_voice(self,face_id,reason):
+        identity=self.unified_identity('face',self.canonical_face(face_id))
+        if identity:
+            if not self.db.execute("SELECT 1 FROM unified_evidence WHERE person_id=? AND modality='voice'",(identity['id'],)).fetchone():return
+            return self.detach_person_evidence(identity['id'],'face',self.canonical_face(face_id),reason)
         from .project_store import _text
         reason=_text(reason,1000)
         with self._transaction():

@@ -3,10 +3,13 @@ from collections import defaultdict
 def proposals(state):
     pairs=defaultdict(list);face_totals=defaultdict(int);voice_totals=defaultdict(int);last={}
     faces=state['face_observations'];voices=state['observations']
+    faces_by_clip=defaultdict(list);voices_by_clip=defaultdict(list)
+    for f in faces:faces_by_clip[f['content_id']].append(f)
+    for v in voices:voices_by_clip[v['content_id']].append(v)
     for f in sorted(faces,key=lambda o:(o['content_id'],o['seconds'])):
         c=f['content_id'];t=f['seconds']
-        visible={o['face_id'] for o in faces if o['content_id']==c and abs(o['seconds']-t)<.02}
-        active=[o for o in voices if o['content_id']==c and o['start']<t+.25 and o['end']>t-.25]
+        visible={o['face_id'] for o in faces_by_clip[c] if abs(o['seconds']-t)<.02}
+        active=[o for o in voices_by_clip[c] if o['start']<t+.25 and o['end']>t-.25]
         ids={o['person_id'] for o in active}
         if len(visible)!=1 or len(ids)!=1:continue
         voice=next(iter(ids));key=(f['face_id'],voice,c)

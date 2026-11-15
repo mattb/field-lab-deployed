@@ -5,7 +5,7 @@ text/image retrieval remains in the existing Orama indexes.
 """
 from __future__ import annotations
 from contextlib import contextmanager
-import hashlib,json,math,sqlite3,time,uuid
+import hashlib,json,math,sqlite3,time,uuid,unicodedata
 from .atomic import fsync_dir
 from pathlib import Path
 
@@ -29,9 +29,30 @@ def _text(value,limit=20000):
     return value.strip()
 
 
+MAX_ASSET_TAGS=64
+MAX_TAG_LENGTH=100
+
+def normalized_tag(value):
+    """One comma-delimited UI token; preserve readable spelling, compare Unicode keys."""
+    if not isinstance(value,str):raise ValueError('Tags must be text')
+    value=unicodedata.normalize('NFKC',value)
+    if any(unicodedata.category(c).startswith('C') or c in '\u2028\u2029' for c in value) or ',' in value:
+        raise ValueError('Tags cannot contain commas, line breaks or control characters')
+    name=' '.join(value.split())
+    if not name or len(name)>MAX_TAG_LENGTH:raise ValueError('Tags must contain 1–100 characters')
+    return name.casefold(),name
+
+class TagConflict(ValueError):
+    def __init__(self,current):
+        super().__init__('Tags changed in another session. Review the current tags before saving.')
+        self.current=current
+
+
 from .face_store import FaceStoreMixin
 
-class ProjectStore(FaceStoreMixin):
+from .unified_people import UnifiedPeopleMixin
+
+class ProjectStore(UnifiedPeopleMixin,FaceStoreMixin):
     def __init__(self,db_path,project_id=None):
         from .sqlite_safety import require_safe_sqlite
         require_safe_sqlite()
@@ -88,8 +109,17 @@ class ProjectStore(FaceStoreMixin):
           inherited_annotation_id TEXT,created_at REAL NOT NULL,annotation_snapshot TEXT NOT NULL DEFAULT '{}',UNIQUE(from_content,to_content,annotation_id,model_revision));
         CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY AUTOINCREMENT,operation TEXT NOT NULL,
           payload TEXT NOT NULL,created_at REAL NOT NULL);
+        CREATE TABLE IF NOT EXISTS tag_vocabulary(
+          id TEXT PRIMARY KEY,canonical_key TEXT NOT NULL UNIQUE,name TEXT NOT NULL,created_at REAL NOT NULL);
+        CREATE TABLE IF NOT EXISTS asset_tag_state(
+          content_id TEXT PRIMARY KEY,revision INTEGER NOT NULL DEFAULT 0 CHECK(revision>=0));
+        CREATE TABLE IF NOT EXISTS asset_tags(
+          content_id TEXT NOT NULL,tag_id TEXT NOT NULL,position INTEGER NOT NULL,
+          PRIMARY KEY(content_id,tag_id),FOREIGN KEY(tag_id) REFERENCES tag_vocabulary(id));
+        CREATE INDEX IF NOT EXISTS asset_tags_by_tag ON asset_tags(tag_id,content_id);
         ''')
         self._init_faces()
+        self._init_unified_people()
         if 'annotation_snapshot' not in {r[1] for r in self.db.execute('PRAGMA table_info(links)')}:
             self.db.execute("ALTER TABLE links ADD COLUMN annotation_snapshot TEXT NOT NULL DEFAULT '{}'")
         # executescript above is intentionally schema-only and may auto-commit.
@@ -103,6 +133,7 @@ class ProjectStore(FaceStoreMixin):
             self.db.execute("INSERT OR IGNORE INTO meta VALUES('edit_revision','0')")
             self.db.execute("INSERT OR IGNORE INTO meta VALUES('schema_version','1')")
             self.db.execute("INSERT OR IGNORE INTO meta VALUES('indexed_edit_revision','-1')")
+            self.db.execute("INSERT OR IGNORE INTO meta VALUES('asset_tags_schema_version','1')")
     def close(self):
         try:self.db.close()
         finally:
@@ -143,6 +174,64 @@ class ProjectStore(FaceStoreMixin):
         with self._transaction():
             if revision<0 or revision>self.edit_revision:raise ValueError('Invalid indexed edit revision')
             if revision>self.indexed_edit_revision:self.db.execute("UPDATE meta SET value=? WHERE key='indexed_edit_revision'",(str(revision),))
+    def _tag_id(self,key):
+        return 'tag_'+uuid.uuid5(uuid.NAMESPACE_URL,self.project_id+'\0'+key).hex
+    def tag_vocabulary(self):
+        """Project tag history, plus safe operator-note suggestions, without promotion."""
+        vocabulary={r['canonical_key']:{'id':r['id'],'name':r['name']} for r in self.db.execute('SELECT id,canonical_key,name FROM tag_vocabulary')}
+        for row in self.db.execute("SELECT metadata FROM annotations WHERE source='operator' ORDER BY created_at,id"):
+            try:values=json.loads(row[0]).get('tags',[])
+            except (ValueError,TypeError,AttributeError):continue
+            if not isinstance(values,list):continue
+            for value in values:
+                try:key,name=normalized_tag(value)
+                except ValueError:continue
+                vocabulary.setdefault(key,{'id':self._tag_id(key),'name':name})
+        return [vocabulary[k] for k in sorted(vocabulary)]
+    def asset_tag_assignments(self):
+        return [dict(r) for r in self.db.execute('''SELECT a.content_id,t.id,t.name FROM asset_tags a
+          JOIN tag_vocabulary t ON t.id=a.tag_id ORDER BY a.content_id,a.position,t.id''')]
+    def asset_tags(self,content_id):
+        content_id=_text(content_id,128)
+        if not self.db.in_transaction:
+            # A GET must return one consistent revision/assignment/vocabulary
+            # snapshot even if another window commits between these queries.
+            self.db.execute('BEGIN')
+            try:return self.asset_tags(content_id)
+            finally:self.db.rollback()
+        row=self.db.execute('SELECT revision FROM asset_tag_state WHERE content_id=?',(content_id,)).fetchone()
+        tags=[dict(r) for r in self.db.execute('''SELECT t.id,t.name FROM asset_tags a
+          JOIN tag_vocabulary t ON t.id=a.tag_id WHERE a.content_id=? ORDER BY a.position,t.id''',(content_id,))]
+        return {'content_id':content_id,'tags':tags,'vocabulary':self.tag_vocabulary(),'revision':row[0] if row else 0}
+    def set_asset_tags(self,content_id,tags,base_revision):
+        content_id=_text(content_id,128)
+        if not isinstance(tags,list) or len(tags)>MAX_ASSET_TAGS:raise ValueError('Provide at most 64 tags')
+        if isinstance(base_revision,bool) or not isinstance(base_revision,int) or base_revision<0:
+            raise ValueError('A valid base revision is required')
+        requested={}
+        for value in tags:
+            key,name=normalized_tag(value);requested.setdefault(key,name)
+        with self._transaction():
+            current=self.asset_tags(content_id)
+            if current['revision']!=base_revision:raise TagConflict(current)
+            wanted_ids=[self._tag_id(key) for key in requested]
+            if wanted_ids==[r['id'] for r in current['tags']]:return current
+            # Suggestions retain the first project spelling once selected. Their
+            # stable IDs are identical before/after assignment, but no note tag
+            # is associated with a clip until this explicit operator operation.
+            prior={normalized_tag(r['name'])[0]:r['name'] for r in current['vocabulary']}
+            for key,name in requested.items():
+                self.db.execute('INSERT OR IGNORE INTO tag_vocabulary(id,canonical_key,name,created_at) VALUES(?,?,?,?)',
+                  (self._tag_id(key),key,prior.get(key,name),time.time()))
+            self.db.execute('DELETE FROM asset_tags WHERE content_id=?',(content_id,))
+            for position,key in enumerate(requested):
+                row=self.db.execute('SELECT id FROM tag_vocabulary WHERE canonical_key=?',(key,)).fetchone()
+                self.db.execute('INSERT INTO asset_tags(content_id,tag_id,position) VALUES(?,?,?)',(content_id,row[0],position))
+            revision=current['revision']+1
+            self.db.execute('INSERT INTO asset_tag_state(content_id,revision) VALUES(?,?) ON CONFLICT(content_id) DO UPDATE SET revision=excluded.revision',(content_id,revision))
+            self._audit('asset_tags_updated',{'content_id':content_id,'old_tags':current['tags'],
+              'tags':[{'id':self._tag_id(key),'name':prior.get(key,name)} for key,name in requested.items()],'revision':revision})
+            return self.asset_tags(content_id)
     def canonical_person(self,person_id):
         seen=set()
         while True:
@@ -154,7 +243,12 @@ class ProjectStore(FaceStoreMixin):
     def _new_person(self,name=None):
         person=_id('person');self.db.execute('INSERT INTO people VALUES(?,?,NULL,?)',(person,name,time.time()));return person
     def people(self):
-        return [dict(row,identity_basis='voice') for row in self.db.execute('SELECT * FROM people ORDER BY created_at,id')]
+        result=[]
+        for row in self.db.execute('SELECT * FROM people ORDER BY created_at,id'):
+            item=dict(row,identity_basis='voice');identity=self.unified_identity('voice',self.canonical_person(row['id']))
+            if identity:item.update(legacy_name=item['name'],name=identity['name'],unified_person_id=identity['id'],name_conflict=bool(identity['name_conflict']))
+            result.append(item)
+        return result
     def _refresh_profiles(self,person_id):
         self.db.execute('DELETE FROM profiles WHERE person_id=?',(person_id,))
         groups={}
@@ -255,6 +349,8 @@ class ProjectStore(FaceStoreMixin):
         rows=self.db.execute('SELECT * FROM observations'+(' WHERE content_id=?' if content_id else '')+' ORDER BY start,end,id',((content_id,) if content_id else ()))
         return [self._observation(row) for row in rows]
     def name_person(self,person_id,name):
+        identity=self.unified_identity('voice',self.canonical_person(person_id))
+        if identity:return self.rename_unified_person(identity['id'],name)
         name=_text(name,200) if name is not None else None
         with self._transaction():
             person_id=self.canonical_person(person_id);old=self.db.execute('SELECT name FROM people WHERE id=?',(person_id,)).fetchone()[0]
@@ -315,8 +411,11 @@ class ProjectStore(FaceStoreMixin):
                 if assigned=={new}:self.db.execute('UPDATE clusters SET person_id=? WHERE content_id=? AND local_speaker=?',(new,row[0],row[1]))
             self._audit('person_split',{'source_id':person_id,'new_id':new,'observation_ids':observation_ids,'reason':_text(reason,1000)})
         return new
-    def add_annotation(self,content_id,text,*,start=None,end=None,metadata=None):
+    def add_annotation(self,content_id,text,*,start=None,end=None,metadata=None,source='operator',source_id=None):
         content_id=_text(content_id,128);text=_text(text)
+        if source not in ('operator','editorial_suggestion'):raise ValueError('Invalid original annotation source')
+        if source=='editorial_suggestion':source_id=_text(source_id,256)
+        elif source_id is not None:raise ValueError('Operator notes do not have an external source ID')
         if (start is None)!=(end is None):raise ValueError('Both annotation bounds are required')
         if start is not None:
             start=float(start);end=float(end)
@@ -325,8 +424,14 @@ class ProjectStore(FaceStoreMixin):
         if not isinstance(metadata,dict):raise ValueError('Metadata must be an object')
         annotation=_id('annotation')
         with self._transaction():
-            self.db.execute('INSERT INTO annotations VALUES(?,?,?,?,?,?,?,?,?)',(annotation,content_id,start,end,text,_json(metadata),'operator',None,time.time()))
-            self._audit('annotation_added',{'annotation_id':annotation,'content_id':content_id})
+            if source_id is not None:
+                prior=self.db.execute('SELECT * FROM annotations WHERE source=? AND source_id=?',(source,source_id)).fetchone()
+                if prior:
+                    if (prior['content_id'],prior['start'],prior['end'],prior['text'],prior['metadata'])!=(content_id,start,end,text,_json(metadata)):
+                        raise ValueError('Editorial suggestion ID already contains different evidence')
+                    return prior['id']
+            self.db.execute('INSERT INTO annotations VALUES(?,?,?,?,?,?,?,?,?)',(annotation,content_id,start,end,text,_json(metadata),source,source_id,time.time()))
+            self._audit('annotation_added',{'annotation_id':annotation,'content_id':content_id,'source':source,'source_id':source_id})
         return annotation
     def update_annotation(self,annotation_id,text,*,metadata=None):
         text=_text(text)

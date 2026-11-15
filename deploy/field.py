@@ -67,6 +67,7 @@ def switch(args,release_id=None,rollback=False):
     home=Path(args.home).expanduser().absolute();state=manager.status(home)
     release=Path(state['previous']) if rollback and state['previous'] else home/'releases'/str(release_id)
     if not release.is_dir():raise ValueError('Requested release is unavailable')
+    manager.check_data_capabilities(Path(state['current']) if state.get('current') else None,release)
     # Full fresh integrity/readiness check before stopping any working service.
     run([release/'.venv/bin/python',release/'deploy/bootstrap.py','--release',release,'--check'])
     manager.mark_ready(home,release.name)
@@ -98,7 +99,7 @@ def doctor(home):
 
 def main():
     p=argparse.ArgumentParser(description=__doc__);sub=p.add_subparsers(dest='command',required=True)
-    for name in ['install','update','activate','rollback','status','doctor','configure','configure-offshoot','start','stop','reconcile','ccc-status','reindex','verify-offshoot','desktop','backup']:
+    for name in ['install','update','activate','rollback','status','doctor','configure','configure-offshoot','start','stop','reconcile','ccc-status','reindex','verify-offshoot','desktop','backup','premiere','people']:
         q=sub.add_parser(name);q.add_argument('--home',type=Path,default=manager.DEFAULT_HOME)
         if name in ['install','update']:q.add_argument('--source',type=Path);q.add_argument('--activate',action='store_true');q.add_argument('--offline',action='store_true')
         if name in ['install','update','activate','rollback']:q.add_argument('--offshoot-idle',action='store_true');q.add_argument('--interrupt-ai',action='store_true')
@@ -108,6 +109,8 @@ def main():
         if name=='configure':q.add_argument('--volume',required=True);q.add_argument('--ingest-folder',default='Ingests');q.add_argument('--port',type=int,default=8766)
         if name=='configure-offshoot':q.add_argument('--offshoot-idle',action='store_true')
         if name=='backup':q.add_argument('backup_args',nargs=argparse.REMAINDER)
+        if name=='people':q.add_argument('--project',type=Path,required=True)
+        if name=='premiere':q.add_argument('premiere_args',nargs=argparse.REMAINDER)
     a=p.parse_args();a.home=a.home.expanduser().resolve()
     try:
         if a.command in ['install','update']:
@@ -141,6 +144,14 @@ def main():
             release=current(a.home);run([release/'.venv/bin/python',release/'deploy/offshoot_status.py']);result={'changes_made':False}
         elif a.command=='ccc-status':
             release=current(a.home);run([release/'.venv/bin/python',release/'deploy/ccc.py']);result={'changed':False}
+        elif a.command=='people':
+            release=current(a.home)
+            with manager.locked(a.home) as (_,_,shared):
+                with manager.stopped_service(shared):run([release/'.venv/bin/python',release/'deploy/people.py','--project',a.project])
+            result={'people':'migrated','service':'stopped; start after checking the migration receipt'}
+        elif a.command=='premiere':
+            import premiere
+            return premiere.main(['--home',str(a.home),*a.premiere_args])
         elif a.command=='backup':
             release=current(a.home)
             # Optional rotation starts no task until run/button. Task definitions
