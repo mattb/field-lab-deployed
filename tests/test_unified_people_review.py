@@ -88,6 +88,9 @@ class UnifiedPeopleSafetyReview(unittest.TestCase):
         self.store.close()
         script = '''
 import os, signal, sys
+# Disposable contract fixture: subprocess does not inherit the CI parent mock.
+from unittest.mock import patch
+patch('ditnotes.sqlite_safety.require_safe_sqlite').start()
 from ditnotes.project_store import ProjectStore
 s=ProjectStore(sys.argv[1], 'safety-fixture')
 n=[0]

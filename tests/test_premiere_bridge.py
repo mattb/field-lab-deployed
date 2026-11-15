@@ -171,6 +171,9 @@ class BridgeTests(unittest.TestCase):
 
     def test_sigkill_uncommitted_outbox_rolls_back(self):
         source = '''import os,signal,sys
+# Disposable contract fixture: subprocess does not inherit the CI parent mock.
+from unittest.mock import patch
+patch('ditnotes.sqlite_safety.require_safe_sqlite').start()
 from ditnotes.premiere_bridge import PremiereBridge
 b=PremiereBridge(sys.argv[1]);s=b._store();s.db.execute('BEGIN IMMEDIATE')
 s.db.execute("INSERT INTO premiere_bridge_operations(operation_id,desired_hash,payload,status,created_at,updated_at) VALUES('interrupted','x','{}','queued',0,0)")
@@ -182,6 +185,9 @@ os.kill(os.getpid(),signal.SIGKILL)
 
     def test_sigkill_after_commit_open_wal_recovers(self):
         source = '''import os,signal,sys
+# Disposable contract fixture: subprocess does not inherit the CI parent mock.
+from unittest.mock import patch
+patch('ditnotes.sqlite_safety.require_safe_sqlite').start()
 from ditnotes.premiere_bridge import PremiereBridge
 b=PremiereBridge(sys.argv[1]);b.queue_snapshot();s=b._store()
 os.kill(os.getpid(),signal.SIGKILL)

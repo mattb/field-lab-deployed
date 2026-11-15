@@ -95,6 +95,9 @@ class ApplyPlanSafety(unittest.TestCase):
         import json,subprocess,sys
         path=self.project/'plan.json';path.write_text(json.dumps(self.plan))
         script="""import json,os,signal,sys
+# Disposable contract fixture: subprocess does not inherit the CI parent mock.
+from unittest.mock import patch
+patch('ditnotes.sqlite_safety.require_safe_sqlite').start()
 from ditnotes.av_validation import apply_plan
 def checkpoint(phase):
  if phase==sys.argv[3]:os.kill(os.getpid(),signal.SIGKILL)
