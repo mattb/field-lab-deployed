@@ -1,4 +1,5 @@
 import React,{useEffect,useState} from 'react';
+import {apiPath} from './multivolume.js';
 import {premiereStatus} from './premiere-status.js';
 
 function conflictValue(value){
@@ -8,19 +9,19 @@ function conflictValue(value){
  return JSON.stringify(value);
 }
 
-export function PremiereBridge(){
+export function PremiereBridge({apiBase=''}){
  const [state,setState]=useState(null),[open,setOpen]=useState(false),[path,setPath]=useState(''),[pair,setPair]=useState(null),[error,setError]=useState(''),[busy,setBusy]=useState(false);
  async function refresh(signal){
-  const response=await fetch('/api/premiere/status',{cache:'no-store',signal});
+  const response=await fetch(apiPath(apiBase,'/api/premiere/status'),{cache:'no-store',signal});
   const value=await response.json();if(!response.ok)throw Error(value.error||'Premiere status unavailable');
   setState(value);setError('');return value;
  }
  useEffect(()=>{const abort=new AbortController();let timer;
   async function poll(){try{await refresh(abort.signal);}catch(e){if(!abort.signal.aborted)setError(e.message);}finally{if(!abort.signal.aborted)timer=setTimeout(poll,2500);}}
   poll();return()=>{abort.abort();clearTimeout(timer);};
- },[]);
+ },[apiBase]);
  async function action(name,value={}){setBusy(true);setError('');try{
-  const response=await fetch('/api/premiere/'+name,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(value)});
+  const response=await fetch(apiPath(apiBase,'/api/premiere/'+name),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(value)});
   const result=await response.json();if(!response.ok)throw Error(result.error||'Premiere request failed');
   if(name==='prepare')setPair(result);await refresh();
  }catch(e){setError(e.message);}finally{setBusy(false);}}

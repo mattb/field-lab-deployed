@@ -3,9 +3,12 @@ import argparse,fcntl,json,subprocess,time,urllib.error,urllib.request
 from pathlib import Path
 
 def dispatch(root,command):
+    if command=='backup-current':
+        subprocess.run([str(root/'.venv/bin/python'),str(root/'deploy/backup_shortcut.py'),'run-current','--home',str(root.parent.parent)],check=True,cwd=root)
+        return
     if command=='ingest':
         # Validate this machine's chosen destination before waking its apps.
-        subprocess.run([str(root/'.venv/bin/python'),'-c','from ingest_service import config,verify_volume; verify_volume(config())'],check=True,cwd=root)
+        subprocess.run([str(root/'.venv/bin/python'),'-c','from ingest_service import config,verify_volume,ROOT; from ditnotes.primary_routing import ensure_not_cutting_over; c=config(); ensure_not_cutting_over(ROOT,c); verify_volume(c)'],check=True,cwd=root)
         subprocess.run(['/usr/bin/open','-a','/Applications/OffShoot.app'],check=True)
     action='start' if command in ('ingest','library','progress') else command
     subprocess.run([str(root/'.venv/bin/python'),str(root/'ingest_service.py'),action],check=True,cwd=root)
@@ -22,7 +25,7 @@ def dispatch(root,command):
         subprocess.run(['/usr/bin/open',url],check=True)
 
 def main():
-    p=argparse.ArgumentParser();p.add_argument('--home',type=Path,required=True);p.add_argument('command',choices=['start','stop','recover','reconcile','ingest','library','progress']);a=p.parse_args()
+    p=argparse.ArgumentParser();p.add_argument('--home',type=Path,required=True);p.add_argument('command',choices=['start','stop','recover','reconcile','ingest','library','progress','backup-current']);a=p.parse_args()
     home=a.home.expanduser().resolve()
     with (home/'deploy.lock').open('a+') as lock:
         fcntl.flock(lock,fcntl.LOCK_SH)

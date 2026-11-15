@@ -73,6 +73,13 @@ class FieldOperatorTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'unavailable'):field.backup_state(self.home,self.old)
         self.assertFalse(missing.exists())
 
+    def test_offline_project_preflight_never_stops_current_service(self):
+        missing=Path(self.tmp.name)/'not-mounted/Original Shoot'
+        (self.home/'shared/config.json').write_text(json.dumps({'ingest_root':str(missing)}))
+        with patch.object(field.manager,'status',return_value=self.state),patch.object(field,'run'),patch.object(field.manager,'mark_ready'),patch.object(field,'service') as service,patch.object(field.manager,'activate') as activate:
+            with self.assertRaisesRegex(ValueError,'not stopped'):field.switch(self.args,self.new.name)
+        service.assert_not_called();activate.assert_not_called();self.assertFalse(missing.exists())
+
     def test_stable_launcher_uses_current_and_quotes_home(self):
         field.save_launcher(self.home)
         text=(self.home/'run').read_text()

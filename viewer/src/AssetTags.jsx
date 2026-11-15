@@ -1,9 +1,11 @@
 import React,{useEffect,useId,useMemo,useRef,useState} from 'react';
 import {formatTags,parseTags,sameTags,savedDraft,tagKey,readTagDraft,writeTagDraft,restoreTagDraft,tagDraftKey} from './asset-tags.js';
 
+import {apiPath} from './multivolume.js';
+
 import {ReactTags} from 'react-tag-autocomplete';
 
-export function AssetTags({contentId,projectId,onChanged}){
+export function AssetTags({contentId,projectId,onChanged,apiBase='',readOnly=false}){
  const [text,setText]=useState(''),[saved,setSaved]=useState([]),[vocabulary,setVocabulary]=useState([]);
  const [loaded,setLoaded]=useState(false),[loading,setLoading]=useState(true),[saving,setSaving]=useState(false);
  const [error,setError]=useState(''),[conflict,setConflict]=useState(false),[status,setStatus]=useState('');
@@ -24,10 +26,10 @@ export function AssetTags({contentId,projectId,onChanged}){
   loadRequest.current?.abort();const controller=new AbortController();loadRequest.current=controller;
   if(replace){setLoading(true);setError('');}
   try{
-   const response=await fetch('/api/asset-tags?content_id='+encodeURIComponent(contentId),{cache:'no-store',signal:controller.signal});
+   const response=await fetch(apiPath(apiBase,'/api/asset-tags?content_id='+encodeURIComponent(contentId)),{cache:'no-store',signal:controller.signal});
    const data=await response.json();if(!response.ok)throw Error(data.error||'Could not load tags');
    if(!alive.current||controller.signal.aborted)return;
-   setVocabulary(data.vocabulary||[]);if(data.project_id)project.current=data.project_id;
+   setVocabulary(data.vocabulary||[]);if(data.project_id)project.current=apiBase?projectId:data.project_id;
    if(replace){
     savedRef.current=data.tags||[];setSaved(savedRef.current);revision.current=data.revision;
     const restored=restoreTagDraft(discardDraft?null:readTagDraft(draftKey()),savedRef.current,revision.current);
@@ -39,17 +41,17 @@ export function AssetTags({contentId,projectId,onChanged}){
   }catch(reason){if(alive.current&&!controller.signal.aborted&&replace)setError(reason.message);}
   finally{if(alive.current&&!controller.signal.aborted&&replace)setLoading(false);}
  }
- useEffect(()=>{alive.current=true;load();return()=>{alive.current=false;loadRequest.current?.abort();};},[contentId]);
+ useEffect(()=>{alive.current=true;load();return()=>{alive.current=false;loadRequest.current?.abort();};},[contentId,apiBase]);
  useEffect(()=>{if(!loaded)return;const timer=setInterval(()=>void load(false),10000);return()=>clearInterval(timer);},[loaded,contentId]);
  async function save(){
-  if(!loaded||blocked.current)return;
+  if(readOnly||!loaded||blocked.current)return;
   if(savingRef.current){resave.current=true;return;}
   if(query.current.trim()){const next=formatTags(parseTags([textRef.current,query.current].join(', ')));query.current='';setQueryText('');if(input.current)input.current.input.value='';update(next);}
   const submitted=textRef.current,tags=parseTags(submitted);
   if(sameTags(tags,savedRef.current))return;
   savingRef.current=true;setSaving(true);setError('');setStatus('Saving…');
   try{
-   const response=await fetch('/api/asset-tags',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({content_id:contentId,tags,base_revision:revision.current})});
+   const response=await fetch(apiPath(apiBase,'/api/asset-tags'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({content_id:contentId,tags,base_revision:revision.current})});
    const data=await response.json();
    if(!response.ok){
     if(response.status===409){blocked.current=true;if(alive.current)setConflict(true);}
@@ -75,7 +77,7 @@ export function AssetTags({contentId,projectId,onChanged}){
  function changeTags(names,clearQuery=true){if(!clearQuery&&query.current.trim())names=[...names,...parseTags(query.current)];query.current='';setQueryText('');if(input.current)input.current.input.value='';update(formatTags(parseTags(names.join(', '))));void save();}
  return <form ref={root} className="asset-tags" onSubmit={event=>{event.preventDefault();void save();}}>
   <ReactTags id={id} ref={input} labelText="Tags" selected={selected} suggestions={suggestions}
-   allowNew activateFirstOption newOptionPosition="first" delimiterKeys={['Enter',',']} allowResize={false} isDisabled={loading||!loaded}
+   allowNew activateFirstOption newOptionPosition="first" delimiterKeys={['Enter',',']} allowResize={false} isDisabled={readOnly||loading||!loaded}
    placeholderText={loading?'Loading…':'Add tags'} newOptionText='Add "%value%"' noOptionsText="No matching tags"
    onValidate={value=>!!tagKey(value)&&!parseTags(textRef.current).some(name=>tagKey(name)===tagKey(value))}
    onAdd={tag=>changeTags([...parseTags(textRef.current),tag.label])}
@@ -83,7 +85,7 @@ export function AssetTags({contentId,projectId,onChanged}){
    onInput={value=>{query.current=value;setQueryText(value);setStatus('');remember(textRef.current);}}
    onFocus={()=>{if(loaded)void load(false);}} onBlur={()=>requestAnimationFrame(()=>{if(alive.current&&!root.current?.contains(document.activeElement))void save();})}
    ariaErrorMessage={error?id+'-error':undefined} isInvalid={!!error}/>
-  {dirty&&<button type="submit" disabled={saving||conflict}>Save tags</button>}
+  {!readOnly&&dirty&&<button type="submit" disabled={saving||conflict}>Save tags</button>}
   {status&&<span className="asset-tags-status" role="status">{status}</span>}
   {error&&<div className="asset-tags-error" id={id+'-error'} role="alert">{error} {(!loaded||conflict)&&<button type="button" onClick={()=>void load(true,conflict)}>{conflict?'Load saved tags':'Retry'}</button>}</div>}
  </form>;

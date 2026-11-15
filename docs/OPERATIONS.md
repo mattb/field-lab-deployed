@@ -126,3 +126,9 @@ Tests on a development Mac establish only their recorded coverage. A fresh-machi
 Unified People updates: follow [People migration and review](PEOPLE.md). Before first access, the application backs up the SQLite registry and verifies that migration leaves legacy evidence unchanged. Preserve the receipt; never restore an old database over later edits. Candidate activation must pass the data-capability downgrade guard. Validate naming, audio playback, visible/heard appearances and a saved/reopened review decision on a disposable project.
 
 For an update that also changes to date-filter backups, use [recipient adoption](BACKUP-ADOPTION.md). Software activation and Desktop installation do not configure CCC tasks.
+
+## More than one ingest primary
+
+When a primary fills, follow [multi-primary cutover](MULTI-PRIMARY.md) using the repository's cutover skill. `primary` records UUID-owned roots and per-primary CCC sets; `cutover` coordinates a durable pending intent, supported OffShoot setup/readback, Backup binding, explicit validation and operator acceptance. Registration or reconnecting an old disk never selects it for ingest. Normal startup is blocked during a pending handover; start validation with `cutover validate`, stop it before `accept`/`finish`, then restart explicitly.
+
+The shoot library keeps derived metadata, indices and still previews on the laptop so disconnected primaries stay searchable in the same Orama architecture. Originals remain on each volume; cached offline data is readonly. Person ownership remains per-primary. Preserve `shared/shoot.json`, per-primary assignment ledgers and library caches. This state requires `multi_primary: 1`; older unsupported writers cannot safely roll back into it. CCC remains the only backup copy engine; its tasks read the original primary roots directly. Configure/read back task endpoints and filters in supported CCC UI, never private app files.

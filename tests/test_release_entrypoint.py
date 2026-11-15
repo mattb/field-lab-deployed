@@ -47,7 +47,7 @@ class ReleaseEntry(unittest.TestCase):
     def test_current_release_is_self_contained_in_source_seal(self):
         from deploy.manager import source_files
         root=Path(__file__).resolve().parents[1]
-        manifest=validate_manifest(root,'v0.1.0-alpha.10');files=source_files(root)
+        manifest=validate_manifest(root,json.loads((root/'FIELD-LAB-RELEASE.json').read_text())['tag']);files=source_files(root)
         for path in ['FIELD-LAB-RELEASE.json','deploy/resolve_release.py',manifest['changelog'],manifest['release_notes'],manifest['update_entrypoint'],*[row['procedure'] for row in manifest['workflow_migrations']]]:
             self.assertIn(path,files)
 

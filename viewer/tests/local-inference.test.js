@@ -32,3 +32,9 @@ test('wide reranking respects bounded local API batches and preserves result ord
  const batches=[];const api=createLocalInference(async(url,options)=>{const body=JSON.parse(options.body);batches.push(body.texts.length);return {ok:true,json:async()=>({scores:body.texts.map(Number)})};});
  const input=Array.from({length:160},(_,i)=>String(i));assert.deepEqual(await api.rerank('station life',input),input.map(Number));assert.deepEqual(batches,[40,40,40,40]);
 });
+
+test('local image inference accepts scoped primary notes without accepting other local routes',async()=>{
+ const calls=[],api=createLocalInference(async(url,options)=>{const body=JSON.parse(options.body);calls.push(body.urls);return {ok:true,json:async()=>({vectors:body.urls.map(()=>vector(512))})};});
+ await api.images(['/primaries/p1/notes/frame.jpg']);assert.deepEqual(calls,[['/primaries/p1/notes/frame.jpg']]);
+ for(const url of ['/primaries/p1/media/original.mp4','/primaries/../notes/frame.jpg','//outside/notes/a.jpg'])assert.throws(()=>api.images([url]),/local/);
+});

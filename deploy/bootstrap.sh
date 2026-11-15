@@ -11,7 +11,9 @@ Field Lab: bash deploy/bootstrap.sh COMMAND [OPTIONS]
   reindex --project PROJECT [--run --offshoot-idle]
   premiere [--home PATH] stage|package|attach-ccx|install|reconcile|verify-runtime|status [OPTIONS]
   desktop [--desktop PATH]
-  backup-shortcut [--home PATH] install|bind|status [OPTIONS]
+  backup-shortcut [--home PATH] install|bind|status|run-current|run|reconcile-attempt [OPTIONS]
+  primary [--home PATH] init|register|status|ledger-path|backup-register|backup-current [OPTIONS]
+  cutover [--home PATH] prepare|apply|validate|accept|finish|status [OPTIONS]
   status | doctor | start | stop | reconcile | rollback --offshoot-idle
 Every command accepts --home PATH. Default: ~/Library/Application Support/Field Lab.
 Install/update prepare only unless --activate is explicitly supplied.

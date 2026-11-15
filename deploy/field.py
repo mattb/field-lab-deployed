@@ -78,7 +78,11 @@ def switch(args,release_id=None,rollback=False):
         value=json.loads(status.read_text())
         if value.get('phase') not in ('ready','stopped','failed','error') and not args.interrupt_ai:
             raise ValueError('AI is busy; wait or use --interrupt-ai to stop safely and reconcile later')
-    if old:service(old,'stop')
+    if old:
+        config_path=home/'shared/config.json'
+        if config_path.is_file() and not Path(json.loads(config_path.read_text())['ingest_root']).is_dir():
+            raise ValueError('Configured project is unavailable; reconnect its original volume before activation. Current service was not stopped.')
+        service(old,'stop')
     backup=backup_state(home,old) if old else None
     result=manager.activate(home,release.name,rollback=rollback)
     save_launcher(home)
@@ -99,7 +103,7 @@ def doctor(home):
 
 def main():
     p=argparse.ArgumentParser(description=__doc__);sub=p.add_subparsers(dest='command',required=True)
-    for name in ['install','update','activate','rollback','status','doctor','configure','configure-offshoot','start','stop','reconcile','ccc-status','reindex','verify-offshoot','desktop','backup-shortcut','premiere','people']:
+    for name in ['install','update','activate','rollback','status','doctor','configure','configure-offshoot','start','stop','reconcile','ccc-status','reindex','verify-offshoot','desktop','backup-shortcut','premiere','people','primary','cutover']:
         q=sub.add_parser(name);q.add_argument('--home',type=Path,default=manager.DEFAULT_HOME)
         if name in ['install','update']:q.add_argument('--source',type=Path);q.add_argument('--activate',action='store_true');q.add_argument('--offline',action='store_true')
         if name in ['install','update','activate','rollback']:q.add_argument('--offshoot-idle',action='store_true');q.add_argument('--interrupt-ai',action='store_true')
@@ -111,6 +115,7 @@ def main():
         if name=='people':q.add_argument('--project',type=Path,required=True)
         if name=='backup-shortcut':q.add_argument('shortcut_args',nargs=argparse.REMAINDER)
         if name=='premiere':q.add_argument('premiere_args',nargs=argparse.REMAINDER)
+        if name in ('primary','cutover'):q.add_argument('workflow_args',nargs=argparse.REMAINDER)
     a=p.parse_args();a.home=a.home.expanduser().resolve()
     try:
         if a.command in ['install','update']:
@@ -155,6 +160,10 @@ def main():
             release=current(a.home)
             run([release/'.venv/bin/python',release/'deploy/backup_shortcut.py',*a.shortcut_args,'--home',str(a.home)])
             result={'command':'backup-shortcut','ccc_settings_changed':False}
+        elif a.command in ('primary','cutover'):
+            release=current(a.home)
+            run([release/'.venv/bin/python',release/('deploy/'+a.command+'.py'),'--home',str(a.home),*a.workflow_args])
+            result={'command':a.command}
         elif a.command=='premiere':
             import premiere
             return premiere.main(['--home',str(a.home),*a.premiere_args])

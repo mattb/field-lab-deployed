@@ -20,14 +20,14 @@ On the Field Lab laptop, type only:
 Update this laptop’s Field Lab installation from https://github.com/mattb/field-lab-deployed
 ```
 
-Codex follows the repository's [update entry point](docs/UPDATE.md), resolves the newest published release including prereleases, deploys that exact version and adopts its listed workflow migrations. This includes the date-filter CCC backup process and binding **Backup** to the actual current task. Existing correct setup is retained. No tag, separate skill-install prompt or long setup prompt is required. Missing disk decisions or app-control access are reported as pending; no disk or task is predefined here. A request explicitly limited to software-only preserves that narrower scope.
+Codex follows the repository's [update entry point](docs/UPDATE.md), resolves the newest published release including prereleases and deploys that exact version. Alpha.11 uses [preservation-only adoption](docs/MULTI-PRIMARY-ADOPTION.md): **your current ingest destination, CCC tasks and Backup binding remain unchanged**. No tag, separate skill-install prompt or long prompt is required. The new multi-volume capabilities are installed without enrolling a primary or cutting over to another drive; those actions need a later explicit request. Old migration instructions are history, not authorization to alter CCC during this update.
 
 ## Install with Codex
 
 Paste this single prompt into Codex on the Mac you want to set up:
 
 ```text
-Install the field-lab Codex skill from https://github.com/mattb/field-lab-deployed/tree/v0.1.0-alpha.10/.agents/skills/field-lab, then read its SKILL.md directly and start the first-time install process for that same release on this Mac. Continue in this turn rather than waiting for automatic skill discovery. OffShoot Pro and CCC are already installed.
+Install the field-lab Codex skill from https://github.com/mattb/field-lab-deployed/tree/v0.1.0-alpha.11/.agents/skills/field-lab, then read its SKILL.md directly and start the first-time install process for that same release on this Mac. Continue in this turn rather than waiting for automatic skill discovery. OffShoot Pro and CCC are already installed.
 ```
 
 This pins both the skill and application to the same tested release. Codex installs the skill, finds or clones the source checkout, checks the Mac, prepares the local software/models, and guides the drive configuration and acceptance tests. It asks for the ingest destination when the actual drive cannot be established from your session. No API key is needed. CCC task setup follows separately after the second physical drive is chosen.
@@ -60,4 +60,8 @@ Source code is MIT licensed. See [THIRD-PARTY.md](THIRD-PARTY.md) for downloaded
 
 See [alpha.8 changes and compatibility](docs/RELEASE-v0.1.0-alpha.8.md) and [read-only static sharing](docs/STATIC-SHARING.md).
 
-The internal [adoption procedure](docs/BACKUP-ADOPTION.md) is part of the default update; users do not need to paste its expanded prompt. See [alpha.10 compatibility](docs/RELEASE-v0.1.0-alpha.10.md).
+The [alpha.11 adoption procedure](docs/MULTI-PRIMARY-ADOPTION.md) preserves the established workflow during an ordinary update. [Backup setup/adoption](docs/BACKUP-ADOPTION.md) remains available for a separately requested configuration change. See [alpha.11 compatibility](docs/RELEASE-v0.1.0-alpha.11.md).
+
+### Additional ingest primaries
+
+The [multi-primary procedure](docs/MULTI-PRIMARY.md) and [cutover skill](.agents/skills/field-lab-cutover/SKILL.md) retain each primary’s CCC pairs and combine cached metadata/search across connected and disconnected volumes. Install/update preserves the current primary and existing CCC tasks. Use cutover only when explicitly moving future ingests to a new primary; old volumes remain browsable through local caches and keep their paired backups.

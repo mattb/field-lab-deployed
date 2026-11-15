@@ -28,7 +28,7 @@ async function initialize(message){
   if(!revision.text||!revision.clip||!revision.reranker){status('lexical-only','Search model revisions missing');return;}
   revisions={text:`mlx:${revision.text}`,clip:`mlx:${revision.clip}`};localInference=createLocalInference();
   working=true;status('loading','Loading index…');
-  try{const response=await fetch('/api/search-vectors',{cache:'no-store'});if(response.ok){const payload=await response.json();if(mine!==generation)return;prebuilt=selectPrebuilt(payload,readiness,docs,message.catalogRevision);}}catch{}
+  try{const response=await fetch(safeLocalUrl(message.vectorsUrl)||'/api/search-vectors',{cache:'no-store'});if(response.ok){const payload=await response.json();if(mine!==generation)return;prebuilt=selectPrebuilt(payload,readiness,docs,message.catalogRevision);}}catch{}
   if(mine!==generation)return;working=false;
   // Availability flags share the scheduler; MLX performs all model work server-side.
   embed=true;reranker=true;clipText=true;clipVision=true;

@@ -17,6 +17,9 @@ jobs:
       - run: python -m unittest discover -s tests -p 'test_field.py' -v
       - run: python -m unittest discover -s tests -p 'test_source_distribution.py' -v
       - run: python -m unittest discover -s tests -p 'test_release_entrypoint.py' -v
+      - run: python -m unittest discover -s tests -p 'test_update_preservation*.py' -v
+      - run: python -m unittest discover -s tests -p 'test_primary*.py' -v
+      - run: python -m unittest discover -s tests -p 'test_cutover_workflow.py' -v
       - run: python -m unittest discover -s tests -p 'test_backup*.py' -v
   model-routing:
     runs-on: ubuntu-latest
@@ -54,7 +57,7 @@ jobs:
           import unittest
           from unittest.mock import patch
           suite = unittest.TestSuite()
-          for pattern in ('test_premiere*.py', 'test_editorial_plan_apply.py', 'test_asset_tags*.py', 'test_unified_people*.py', 'test_browse.py', 'test_search_passages.py', 'test_av_validation.py', 'test_static_export_review.py'):
+          for pattern in ('test_premiere*.py', 'test_editorial_plan_apply.py', 'test_asset_tags*.py', 'test_unified_people*.py', 'test_browse.py', 'test_search_passages.py', 'test_av_validation.py', 'test_static_export_review.py', 'test_multivolume.py'):
               suite.addTests(unittest.defaultTestLoader.discover('tests', pattern=pattern))
           with patch('ditnotes.sqlite_safety.require_safe_sqlite'):
               result = unittest.TextTestRunner(verbosity=2).run(suite)
