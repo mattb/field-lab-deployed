@@ -10,12 +10,22 @@ Qwen3.5-4B handles fast ingest visual notes; Qwen3.8-27B handles agentic chat, t
 
 This is an early deployment release. Supported target: **Apple Silicon, macOS 27+, Xcode Command Line Tools**, OffShoot Pro 26.3+. First installation requires internet and enough space for models, caches, dependencies and source builds; allow at least 65 GB free. Older operating systems have not been validated. OffShoot/CCC licenses are purchased separately. CCC is configured separately after explicitly choosing the second drive.
 
+## Update with Codex
+
+On the Field Lab laptop, type only:
+
+```text
+Update this laptop’s Field Lab installation from https://github.com/mattb/field-lab-deployed
+```
+
+Codex follows the repository's [update entry point](docs/UPDATE.md), resolves the newest published release including prereleases, deploys that exact version and adopts its listed workflow migrations. This includes the date-filter CCC backup process and binding **Backup** to the actual current task. Existing correct setup is retained. No tag, separate skill-install prompt or long setup prompt is required. Missing disk decisions or app-control access are reported as pending; no disk or task is predefined here. A request explicitly limited to software-only preserves that narrower scope.
+
 ## Install with Codex
 
 Paste this single prompt into Codex on the Mac you want to set up:
 
 ```text
-Install the field-lab Codex skill from https://github.com/mattb/field-lab-deployed/tree/v0.1.0-alpha.9/.agents/skills/field-lab, then read its SKILL.md directly and start the first-time install process for that same release on this Mac. Continue in this turn rather than waiting for automatic skill discovery. OffShoot Pro and CCC are already installed.
+Install the field-lab Codex skill from https://github.com/mattb/field-lab-deployed/tree/v0.1.0-alpha.10/.agents/skills/field-lab, then read its SKILL.md directly and start the first-time install process for that same release on this Mac. Continue in this turn rather than waiting for automatic skill discovery. OffShoot Pro and CCC are already installed.
 ```
 
 This pins both the skill and application to the same tested release. Codex installs the skill, finds or clones the source checkout, checks the Mac, prepares the local software/models, and guides the drive configuration and acceptance tests. It asks for the ingest destination when the actual drive cannot be established from your session. No API key is needed. CCC task setup follows separately after the second physical drive is chosen.
@@ -48,4 +58,4 @@ Source code is MIT licensed. See [THIRD-PARTY.md](THIRD-PARTY.md) for downloaded
 
 See [alpha.8 changes and compatibility](docs/RELEASE-v0.1.0-alpha.8.md) and [read-only static sharing](docs/STATIC-SHARING.md).
 
-To update an existing laptop **and adopt date-filter CCC backups**, paste the [update-and-adopt prompt](docs/prompts/UPDATE-AND-ADOPT-BACKUPS.md). A software-only update preserves existing CCC settings. See [alpha.9 compatibility](docs/RELEASE-v0.1.0-alpha.9.md).
+The internal [adoption procedure](docs/BACKUP-ADOPTION.md) is part of the default update; users do not need to paste its expanded prompt. See [alpha.10 compatibility](docs/RELEASE-v0.1.0-alpha.10.md).

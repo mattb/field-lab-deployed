@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "tag": "v0.1.0-alpha.10",
+  "update_entrypoint": "docs/UPDATE.md",
+  "workflow_migrations": [
+    {
+      "id": "ccc-date-filter-v1",
+      "procedure": "docs/BACKUP-ADOPTION.md",
+      "description": "Adopt original-source CCC date filters and bind the Backup desktop action",
+      "scope": "Field Lab backup tasks and operator-selected backup disks only"
+    }
+  ]
+}

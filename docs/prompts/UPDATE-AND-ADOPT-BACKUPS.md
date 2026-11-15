@@ -1,9 +1,9 @@
 # Update and adopt date-filter backups
 
-Paste this into Codex on the recipient Field Lab Mac. It authorizes the new backup setup in addition to a software update; the ordinary update prompt deliberately does not change CCC tasks.
+Expanded internal reference for the complete update scope. Users need only the short repository-URL request in docs/UPDATE.md; the agent supplies this context from the selected release. Follow the resolved release manifest rather than treating the SELECTED_RELEASE placeholder below as a latest-version pin.
 
 ```text
-Update this Mac's Field Lab from https://github.com/mattb/field-lab-deployed to v0.1.0-alpha.9, then adopt its date-filter CCC backup workflow. Read the NEW tag's AGENTS.md, docs/prompts/FIELD-UPDATE.md, docs/BACKUP-ADOPTION.md and .agents/skills/field-lab-backup/SKILL.md directly; don't rely on a previously installed skill's instructions or automatic discovery.
+Update this Mac's Field Lab from https://github.com/mattb/field-lab-deployed to SELECTED_RELEASE, then adopt its date-filter CCC backup workflow. Read the NEW tag's AGENTS.md, docs/prompts/FIELD-UPDATE.md, docs/BACKUP-ADOPTION.md and .agents/skills/field-lab-backup/SKILL.md directly; don't rely on a previously installed skill's instructions or automatic discovery.
 
 Inspect the actual installed version/home, configured project, mounted primary/backup disks and CCC tasks. Preserve existing media, project databases, metadata, backup copies, private records and unrelated CCC tasks. Use the same application home. Prepare and activate the new candidate using the documented quiet-time process before running its backup-shortcut commands. Refresh the Desktop apps on this recipient Mac.
 

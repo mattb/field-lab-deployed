@@ -1,6 +1,6 @@
 # Adopt date-filter CCC backups on an existing Field Lab laptop
 
-This procedure lives in the release so Codex needs no maintainer chat history. [Update and adopt prompt](prompts/UPDATE-AND-ADOPT-BACKUPS.md) requests both software deployment and CCC setup. A plain software update installs the new code/skills/Desktop action and preserves configuration; it does not silently convert CCC tasks.
+This procedure lives in the release so Codex needs no maintainer chat history. [Update and adopt prompt](prompts/UPDATE-AND-ADOPT-BACKUPS.md) requests both software deployment and CCC setup. The default repository-URL update includes adoption when the selected release manifest lists it. An explicitly software-only update preserves CCC configuration. The agent reads this procedure internally; the user need not paste the expanded prompt.
 
 ## 1. Discover the installation
 

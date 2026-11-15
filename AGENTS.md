@@ -2,6 +2,12 @@
 
 This repository deploys an offline, local media indexer and its OffShoot integration on a filmmaker's Mac. The checkout is source, not the installed application. Read `docs/OPERATIONS.md` and the applicable prompt in `docs/prompts/` before installation or updates.
 
+## Update requests from a repository URL
+
+For a request such as “Update this laptop’s Field Lab installation from https://github.com/mattb/field-lab-deployed”, start at `docs/UPDATE.md`. No large pasted prompt or explicit “adopt backups” phrase is required. Resolve the newest published release INCLUDING prereleases unless a ref is specified, pin it, read its `FIELD-LAB-RELEASE.json`, deploy it and apply its listed workflow migrations. Main-branch code is not itself a published release. Read current repository instructions even when an installed skill is stale.
+
+An unqualified update includes that manifest's scoped Field Lab workflow migrations, including dedicated CCC date-filter setup and the current-task Backup binding. Restrict changes to identified Field Lab tasks and operator-selected/established disks. Preserve unrelated tasks and all copies. If configuration inputs or supported app-control capability are missing, complete independent work and report migration pending; don't ask the user to restate the long setup prompt. Explicit software-only requests retain that narrower scope.
+
 ## Scope and storage
 
 - Keep software releases in the configured application home, default `~/Library/Application Support/Field Lab`.
@@ -17,7 +23,7 @@ This repository deploys an offline, local media indexer and its OffShoot integra
 - Do not format/eject cards, delete/move original media, change filesystem permissions globally, clear an index, merge people, rename identities, or reset a project as an installation workaround.
 - Metadata, identity labels, audit history and chat live in project SQLite databases. Never overwrite them with fixtures or a database from a release. For a database backup use SQLite's backup API, not a raw copy of a live `.sqlite3` file that omits its WAL.
 - Code rollback does not undo database migrations. Follow the documented compatibility and backup checks; never blindly restore an older metadata database over subsequent operator edits.
-- Keep CCC unchanged unless the user explicitly requests configuration and supplies its source/destination. Installation does not authorize deleting a backup's files or enabling a mirror's deletion policy.
+- Keep CCC unchanged during an explicitly software-only update. A normal update may apply the selected release manifest’s scoped CCC workflow migration after the actual source/destination are established; other CCC configuration requires an explicit request. Installation does not authorize deleting a backup's files or enabling a mirror's deletion policy.
 
 ## Evidence and reporting
 
