@@ -51,7 +51,7 @@ def validate_manifest(checkout,tag):
     if manifest.is_symlink():raise ValueError('Release manifest must be a regular file')
     value=json.loads(manifest.read_text())
     if value.get('schema')!=1 or value.get('tag')!=tag:raise ValueError('Release manifest tag/schema mismatch')
-    procedures=[value['update_entrypoint']]
+    procedures=[value['update_entrypoint'],value['changelog'],value['release_notes']]
     migrations=value['workflow_migrations']
     if not isinstance(migrations,list):raise ValueError('Invalid workflow migrations')
     seen=set()

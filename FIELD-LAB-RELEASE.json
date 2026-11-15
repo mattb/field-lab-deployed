@@ -9,5 +9,7 @@
       "description": "Adopt original-source CCC date filters and bind the Backup desktop action",
       "scope": "Field Lab backup tasks and operator-selected backup disks only"
     }
-  ]
+  ],
+  "changelog": "CHANGELOG.md",
+  "release_notes": "docs/RELEASE-v0.1.0-alpha.10.md"
 }

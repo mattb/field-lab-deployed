@@ -10,6 +10,8 @@ Qwen3.5-4B handles fast ingest visual notes; Qwen3.8-27B handles agentic chat, t
 
 This is an early deployment release. Supported target: **Apple Silicon, macOS 27+, Xcode Command Line Tools**, OffShoot Pro 26.3+. First installation requires internet and enough space for models, caches, dependencies and source builds; allow at least 65 GB free. Older operating systems have not been validated. OffShoot/CCC licenses are purchased separately. CCC is configured separately after explicitly choosing the second drive.
 
+See the [per-release changelog](CHANGELOG.md) for changes, upgrade actions and evidence limits.
+
 ## Update with Codex
 
 On the Field Lab laptop, type only:

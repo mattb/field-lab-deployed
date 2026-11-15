@@ -32,7 +32,7 @@ class ReleaseEntry(unittest.TestCase):
     def test_manifest_tag_and_local_procedures_are_validated(self):
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder).resolve();(root/'docs').mkdir();(root/'docs/UPDATE.md').write_text('entry');(root/'docs/backup.md').write_text('migration')
-            value={'schema':1,'tag':'v0.1.0-alpha.10','update_entrypoint':'docs/UPDATE.md','workflow_migrations':[{'id':'ccc-date-filter-v1','procedure':'docs/backup.md'}]}
+            value={'schema':1,'tag':'v0.1.0-alpha.10','update_entrypoint':'docs/UPDATE.md','changelog':'docs/UPDATE.md','release_notes':'docs/backup.md','workflow_migrations':[{'id':'ccc-date-filter-v1','procedure':'docs/backup.md'}]}
             path=root/'FIELD-LAB-RELEASE.json';path.write_text(json.dumps(value))
             self.assertEqual(validate_manifest(root,value['tag']),value)
             with self.assertRaises(ValueError):validate_manifest(root,'v0.1.0-alpha.9')
@@ -41,14 +41,14 @@ class ReleaseEntry(unittest.TestCase):
     def test_missing_or_symlink_procedure_cannot_escape_source(self):
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder).resolve();outside=root/'other';outside.write_text('outside');(root/'docs').mkdir();(root/'docs/entry').symlink_to(outside)
-            value={'schema':1,'tag':'v0.1.0-alpha.10','update_entrypoint':'docs/entry','workflow_migrations':[]}
+            value={'schema':1,'tag':'v0.1.0-alpha.10','update_entrypoint':'docs/entry','changelog':'docs/entry','release_notes':'docs/entry','workflow_migrations':[]}
             (root/'FIELD-LAB-RELEASE.json').write_text(json.dumps(value))
             with self.assertRaises(ValueError):validate_manifest(root,value['tag'])
     def test_current_release_is_self_contained_in_source_seal(self):
         from deploy.manager import source_files
         root=Path(__file__).resolve().parents[1]
         manifest=validate_manifest(root,'v0.1.0-alpha.10');files=source_files(root)
-        for path in ['FIELD-LAB-RELEASE.json','deploy/resolve_release.py',manifest['update_entrypoint'],*[row['procedure'] for row in manifest['workflow_migrations']]]:
+        for path in ['FIELD-LAB-RELEASE.json','deploy/resolve_release.py',manifest['changelog'],manifest['release_notes'],manifest['update_entrypoint'],*[row['procedure'] for row in manifest['workflow_migrations']]]:
             self.assertIn(path,files)
 
 if __name__=='__main__':unittest.main()
