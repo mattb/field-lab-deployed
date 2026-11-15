@@ -21,6 +21,16 @@ class FieldOperatorTests(unittest.TestCase):
         self.state={'current':str(self.old),'previous':str(self.new)}
         self.args=argparse.Namespace(home=self.home,offshoot_idle=True,interrupt_ai=False)
 
+    def test_desktop_workflow_installs_backup_without_binding_or_starting_ccc(self):
+        import contextlib,io
+        desktop=self.home/'Fake Desktop';desktop.mkdir()
+        with patch.object(field,'current',return_value=self.old),patch.object(field,'save_launcher'),patch('desktop.install',return_value={'apps':['core']}) as core,patch('backup_shortcut.install',return_value={'backup_started':False}) as backup,patch.object(field,'run') as run,contextlib.redirect_stdout(io.StringIO()):
+            with patch.object(sys,'argv',['field.py','desktop','--home',str(self.home),'--desktop',str(desktop)]):
+                self.assertEqual(field.main(),0)
+        core.assert_called_once_with(self.home.resolve(),desktop)
+        backup.assert_called_once_with(self.home.resolve(),desktop)
+        run.assert_not_called()
+
     def test_switch_needs_observed_offshoot_idle(self):
         self.args.offshoot_idle=False
         with patch.object(field,'run') as run,patch.object(field,'service') as service:

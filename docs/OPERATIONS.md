@@ -34,13 +34,14 @@ For updates, fetch/check out the maintainer's stated tag or commit in the source
 ```sh
 bash deploy/bootstrap.sh update
 bash deploy/bootstrap.sh activate --release RELEASE_ID --offshoot-idle
+bash deploy/bootstrap.sh desktop
 bash deploy/bootstrap.sh doctor
 bash deploy/bootstrap.sh start
 ```
 
 The candidate ID is a source-tree hash, distinct from the Git commit; record both. `--home "/chosen/application/home"` selects another application home on every command. Use the same home consistently. `stop`, `reconcile`, and `status` are available through the same entry point. Roll back at a quiet point with `rollback --offshoot-idle`, check `doctor`, then explicitly `start`; review database compatibility first. No command here configures CCC. `ccc-status` inventories its supported CLI without changing tasks; see [CCC setup](CCC-SETUP.md). Read [analysis/UI upgrade behavior](UPGRADES.md) before requesting a reindex.
 
-The optional [Desktop apps](DESKTOP.md) provide double-click entry points for ingest, library, native progress and stopping AI. They keep their paths across release switches.
+The optional [Desktop apps](DESKTOP.md) provide double-click entry points for ingest, library, native progress, stopping AI and starting the current CCC backup task. They keep their paths across release switches.
 
 For Image Capture/MTP devices without a mounted filesystem, see [MacDroid ingestion](MACDROID-INGEST.md). The adapter supplies an optional folder source to OffShoot; the verified physical destination, receipt gate, AI service and separately configured CCC remain the same. Native CloudStorage caching limits claims about independent camera rereading. This is not an automatic camera importer or a substitute for the adapter's physical acceptance test.
 
@@ -101,7 +102,7 @@ CCC remains untouched by these install/update instructions. To add it later, cho
 
 Verify the second copy and check playable media before authorizing card reuse. A future Finder reorganization of drive 1 requires reconciliation and another CCC run; it is not propagated by OffShoot itself.
 
-If the primary exceeds the size of each secondary drive, use the separately requested [backup rotation manager](BACKUP-ROTATION.md) rather than a whole-project mirror task. `backup ui` is opt-in, uses registered dedicated CCC tasks and APFS clone projections, and preserves the current ingest hierarchy. Its checksummed project ledger and spool survive code updates. Do not change existing CCC tasks during installation/update. Partitioned archive paths remain stable after a set closes; the whole-project Finder-mirror behavior above does not apply to rotation. Stop the rotation UI before a release switch; unknown CCC attempts reconcile on restart without stopping CCC.
+If the primary exceeds the size of each secondary drive, use the separately requested [date-filter rotation plan](BACKUP-ROTATION.md). CCC copies originals through dedicated per-disk tasks. Previous tasks include explicit assigned date/card folders; the current task excludes all prior assignments. Preserve private assignments and verification records across updates. The [backup skill](../.agents/skills/field-lab-backup/SKILL.md) guides the supported UI handover; there is no established headless filter configuration API. Do not claim a Desktop action can apply that configuration automatically or change existing tasks during an ordinary update.
 
 ## Interrupted work and recovery
 
@@ -123,3 +124,5 @@ Tests on a development Mac establish only their recorded coverage. A fresh-machi
 
 
 Unified People updates: follow [People migration and review](PEOPLE.md). Before first access, the application backs up the SQLite registry and verifies that migration leaves legacy evidence unchanged. Preserve the receipt; never restore an old database over later edits. Candidate activation must pass the data-capability downgrade guard. Validate naming, audio playback, visible/heard appearances and a saved/reopened review decision on a disposable project.
+
+For an update that also changes to date-filter backups, use [recipient adoption](BACKUP-ADOPTION.md). Software activation and Desktop installation do not configure CCC tasks.

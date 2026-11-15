@@ -11,6 +11,16 @@ class SourceDistribution(unittest.TestCase):
    if (ROOT/'.git').exists():
     result=subprocess.run(['git','ls-files','--error-unmatch','--',name],cwd=ROOT,capture_output=True,text=True)
     self.assertEqual(result.returncode,0,name+' is visible locally but absent from Git')
+ def test_backup_adoption_resources_are_portable_and_tracked(self):
+  required=['deploy/backup_shortcut.py','.agents/skills/field-lab-backup/SKILL.md','.agents/skills/field-lab-backup/scripts/plan_rotation.py','docs/BACKUP-ADOPTION.md','docs/prompts/UPDATE-AND-ADOPT-BACKUPS.md']
+  spec=importlib.util.spec_from_file_location('backup_distribution_manager',ROOT/'deploy/manager.py')
+  manager=importlib.util.module_from_spec(spec);spec.loader.exec_module(manager)
+  files=manager.source_files(ROOT)
+  for name in required:
+   self.assertIn(name,files)
+   if (ROOT/'.git').exists():
+    result=subprocess.run(['git','ls-files','--error-unmatch','--',name],cwd=ROOT,capture_output=True,text=True)
+    self.assertEqual(result.returncode,0,name+' absent from Git')
  def test_checkout_and_worktree_have_identical_portable_source_identity(self):
   spec=importlib.util.spec_from_file_location('source_distribution_manager',ROOT/'deploy/manager.py')
   manager=importlib.util.module_from_spec(spec);spec.loader.exec_module(manager)

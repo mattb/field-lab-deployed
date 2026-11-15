@@ -2,7 +2,7 @@
 
 CCC is optional until a second physical destination is chosen. The installer leaves existing CCC tasks unchanged. This guide is for Codex operating CCC on the field Mac after the operator identifies drive 1 and drive 2; it is not a claim that a task was configured or tested there.
 
-This document describes a single-destination mirror. When backup drives are smaller than the primary, use [backup rotation](BACKUP-ROTATION.md): separate APFS clone sources, new dedicated tasks per drive, registered endpoints/guards and resumable whole-card allocation. Its partitioned archival behavior differs from the mirror's Finder-move propagation below. Installing either workflow never changes existing tasks automatically.
+This document describes a single-destination mirror. When backup drives are smaller than the primary, use the [date-filter rotation plan](BACKUP-ROTATION.md): dedicated tasks read the same original project root, previous disks include assigned date/card folders, and the current disk excludes all prior assignments. CCC UI configuration is still required when rotating; routine install/update never changes tasks automatically.
 
 ## Supported automation and its boundary
 

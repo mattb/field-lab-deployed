@@ -98,13 +98,13 @@ Premiere distinguishes shared file metadata from project-specific clip metadata.
 
 Default proposal:
 
-1. Preserve original media bytes and the sealed date/card directory inventories. Store managed packets under `_DIT_NOTES/editorial/xmp/ASSET_ID.xmp`, not inside already sealed card folders. These are editable exchange packets, not an assertion that Premiere auto-discovers that location. The bridge explicitly applies their relevant fields.
+1. Preserve original media bytes and the verified date/card directory inventories. Store managed packets under `_DIT_NOTES/editorial/xmp/ASSET_ID.xmp`, outside original card folders. These are editable exchange packets, not an assertion that Premiere auto-discovers that location. The bridge explicitly applies their relevant fields.
 2. Read existing embedded/sidecar camera metadata as input. Patch only owned properties in exchange packets and preserve unknown schemas, qualifiers, array types and unowned marker tracks using Adobe's SDK.
 3. Map shared editorial facts to standard XMP where semantics match: title/description/keyword bag, human log comment, keeper flag and true scene/shot information. Add a small Field Lab namespace for asset/project IDs, distinct visible/speaking people, AI provenance and review/sync revisions. Keep vectors, raw face crops and the full audit/identity graph in their existing stores.
 4. In Premiere use **project metadata** for displayed fields and native project markers/transcripts. Do not automatically enable linking, XMP ID writes or marker-to-source-XMP writes against immutable originals. Any preference change needs its own explicit configuration and copy-only acceptance test.
 5. Watch external packet edits, import them through the same validation/history path as web annotations, and project committed native edits back into the shared field model/XMP. No whole-packet replacement that erases unknown or human data.
 
-The existing backup rotation seal would reject newly added sibling files in a sealed card scope, and embedded writes would change whole-file content IDs/checksums. Keeping editable XMP inside the generated metadata area avoids both problems and puts it in the existing metadata snapshot scope. An optional later editable-media-copy mode could embed into independent APFS clones, with explicit identity mapping; it should not be the first field default.
+Embedded writes would change whole-file content IDs/checksums. Keep editable XMP in the project metadata area, separate from original card files, and include it explicitly in the CCC metadata backup policy. CCC backs up original date folders directly; changing metadata must not be confused with original-media verification.
 
 ## Ownership and interruption recovery
 

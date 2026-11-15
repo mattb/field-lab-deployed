@@ -1,0 +1,11 @@
+# v0.1.0-alpha.9 — date-filter CCC backups
+
+CCC alone copies originals from the unchanged project hierarchy. Previous backup tasks include explicit dated folders; the current task excludes all prior assignments and automatically receives new dated folders. The former rotation implementation/commands have been withdrawn; existing backup files, records and CCC tasks are preserved.
+
+This release adds the repository backup skill, read-only date-filter proposal script, recipient Desktop Backup action and explicit first-set/adoption/update procedures. Backup has no default task. The skill binds the actual task only after CCC setup/Preview/acceptance; later rotations update the same private pointer. Ordinary software updates preserve that binding and do not reconfigure CCC.
+
+**To adopt the process as well as update software, use [Update and adopt backups](prompts/UPDATE-AND-ADOPT-BACKUPS.md).** Existing managed installs are inspected and updated through candidate preparation and quiet activation. Unmanaged, corrupt or incompatible layouts require recovery rather than a guessed migration. CCC task/filter setup still requires its supported UI; no headless configuration API or manufactured task files are used.
+
+No models, requirements lock, analysis recipe or project data schema changed relative to alpha.8; no AI reindex is required by this release. Preserve shared models, queue, annotations/People, task assignments, verification history, old backup copies and previous executable releases. Removing an old command does not remove its data. Do not start retired automation after update. A code rollback does not undo CCC configuration or later metadata edits; use recorded configurations and reviewed recovery, never overwrite newer data blindly.
+
+Local tests cover date assignment planning, renamed/missing days, late/backdated folders, preservation of rich records, pending-handover refusal, source protection and atomic no-overwrite proposals; native shortcut compilation/signing, missing task, pointer preservation, concurrent/interrupted installation and upgrade activation are also exercised in temporary folders. Independent blinded roleplays reviewed the skill against synthetic local folders. These tests do not certify the actual field laptop, CCC filter UI or physical copy/restore; acceptance remains explicit in the adoption guide.

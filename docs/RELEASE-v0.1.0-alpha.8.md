@@ -5,7 +5,7 @@ This prerelease brings together the work developed since alpha.6. It contains re
 - Premiere bridge: sealed Adobe plugin packaging/install/update, source transcripts, exact tag Search Bins, clip metadata and markers, previews and selects. Editor changes produce conflicts rather than silent replacement. See [installation](PREMIERE-INSTALL.md) and [validation boundaries](PREMIERE-PRODUCTION-VALIDATION.md).
 - Separate asset tags with corpus autocomplete, resizable folder navigation and one global semantic search using local embeddings, reranking and CLIP.
 - Unified People registry with face and voice evidence, reversible review and visible/heard distinctions. Cross-recording voice analysis remains evidence, not proof of lip synchronization. See [People migration](PEOPLE.md).
-- Optional smaller-drive backup rotation, atomic ledgers and restart reconciliation. Existing CCC tasks remain untouched; physical acceptance and dedicated task setup are required. See [rotation validation](RELEASE-v0.1.0-alpha.7.md).
+- Backup-rotation support from this prerelease has been withdrawn in the current source. The replacement [date-filter plan](BACKUP-ROTATION.md) keeps CCC reading originals directly and requires supported UI configuration at handover. Existing backup data and CCC tasks must be preserved.
 - Read-only static project export with browser-local inference and precomputed compatible search vectors; optional private S3/CloudFront hosting with expiring access links. See [static sharing](STATIC-SHARING.md).
 
 ## Update and compatibility

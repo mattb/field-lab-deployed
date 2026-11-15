@@ -15,7 +15,7 @@ Keep separate results for software tests, local model inference, UI persistence,
 
 If using a MacDroid/MTP camera source, also run the [adapter acceptance checks](MACDROID-INGEST.md#acceptance-before-field-use), including an uncached interrupted download and receipt/queue verification. A card-reader test does not validate this path, and a source reread through MacDroid may use its cache.
 
-For explicitly enabled smaller-drive backup rotation, run the [rotation acceptance](BACKUP-ROTATION.md#acceptance-and-disaster-coverage) using NEW disposable CCC tasks, two independent backup drives and a secured per-task guard. Check whole-card allocation, a full-drive swap, real CCC verification and independent manager hashes, metadata restore, interrupted manager/CCC recovery and preservation of all existing tasks. Automated SIGKILL/fake-CCC tests do not replace this hardware test.
+For requested date-filter backup rotation, follow [rotation acceptance](BACKUP-ROTATION.md#acceptance). Use disposable local folders to test proposals and handover recovery, then supported CCC UI to confirm actual task endpoints, date inclusions/exclusions, late footage, capacity and copy/restore verification. Planning tests do not prove CCC configuration or physical backup success. Preserve existing tasks and data.
 
 ## Failure scenarios
 

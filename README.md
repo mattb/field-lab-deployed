@@ -15,12 +15,12 @@ This is an early deployment release. Supported target: **Apple Silicon, macOS 27
 Paste this single prompt into Codex on the Mac you want to set up:
 
 ```text
-Install the field-lab Codex skill from https://github.com/mattb/field-lab-deployed/tree/v0.1.0-alpha.8/.agents/skills/field-lab, then read its SKILL.md directly and start the first-time install process for that same release on this Mac. Continue in this turn rather than waiting for automatic skill discovery. OffShoot Pro and CCC are already installed.
+Install the field-lab Codex skill from https://github.com/mattb/field-lab-deployed/tree/v0.1.0-alpha.9/.agents/skills/field-lab, then read its SKILL.md directly and start the first-time install process for that same release on this Mac. Continue in this turn rather than waiting for automatic skill discovery. OffShoot Pro and CCC are already installed.
 ```
 
 This pins both the skill and application to the same tested release. Codex installs the skill, finds or clones the source checkout, checks the Mac, prepares the local software/models, and guides the drive configuration and acceptance tests. It asks for the ingest destination when the actual drive cannot be established from your session. No API key is needed. CCC task setup follows separately after the second physical drive is chosen.
 
-The first-install process creates four native Desktop launchers: **Field Lab Ingest**, **Field Lab Library**, **Field Lab AI Progress**, and **Field Lab Stop AI**. They follow the active release across updates, show native error alerts and run without Terminal windows. Ingest opens OffShoot; selecting the card and starting a transfer remain explicit. See [Desktop launchers](docs/DESKTOP.md).
+The first-install process creates five native Desktop launchers: **Field Lab Ingest**, **Field Lab Library**, **Field Lab AI Progress**, **Field Lab Stop AI**, and **Backup**. Backup has no predefined task; the backup skill binds it after real CCC setup and updates it at each completed rotation. They follow the active release across updates, show native error alerts and run without Terminal windows. Ingest opens OffShoot; selecting the card and starting a transfer remain explicit. See [Desktop launchers](docs/DESKTOP.md).
 
 The [skill](.agents/skills/field-lab/SKILL.md), [install prompt](docs/prompts/FIRST-INSTALL.md), [update prompt](docs/prompts/FIELD-UPDATE.md), and [operations guide](docs/OPERATIONS.md) contain the underlying steps and recovery commands. A globally installed skill locates its repository independently of its installation folder.
 
@@ -36,7 +36,7 @@ Do the [smoke test](docs/SMOKE-TEST.md) on your own disposable footage and a tes
 
 USB cameras that appear in Image Capture instead of as disks can optionally use [MacDroid as an OffShoot folder source](docs/MACDROID-INGEST.md). A MISSION 1 PRO folder was accepted and enumerated; a full verified transfer through this adapter is still pending, and Skydio X10 compatibility is untested. MacDroid is separately installed/licensed and may cache source data. See the procedure for the verification boundary and camera-specific acceptance checks.
 
-For a primary drive larger than the backup drives, optional [backup rotation](docs/BACKUP-ROTATION.md) provides a local **Back up pending footage** button, whole-card allocation, drive-swap prompts, atomic recovery and independent destination hashing. APFS clone sources preserve your current ingest hierarchy. Only explicitly registered NEW dedicated CCC tasks can be started; existing CCC tasks/settings stay untouched. Setup requires per-drive task/guard acceptance on the actual Mac. This is a partitioned archive; arbitrary later Finder moves are not automatically mirrored across offline drives. See [rotation validation and limits](docs/RELEASE-v0.1.0-alpha.7.md).
+For a primary drive larger than the backup drives, [date-filter backup rotation](docs/BACKUP-ROTATION.md) uses one dedicated CCC task per disk. Previous tasks explicitly include their assigned date/card folders; the current task excludes all older assignments and automatically includes new ingests. CCC reads the original project folders directly. The [backup skill](.agents/skills/field-lab-backup/SKILL.md) guides planning, supported CCC UI configuration and recovery. A published headless filter configuration API has not been established, so fully autonomous rotation is not claimed.
 
 ## Development
 
@@ -47,3 +47,5 @@ Application source is in `ditnotes/`, `search/`, `viewer/` and `native-progress/
 Source code is MIT licensed. See [THIRD-PARTY.md](THIRD-PARTY.md) for downloaded components and model provenance.
 
 See [alpha.8 changes and compatibility](docs/RELEASE-v0.1.0-alpha.8.md) and [read-only static sharing](docs/STATIC-SHARING.md).
+
+To update an existing laptop **and adopt date-filter CCC backups**, paste the [update-and-adopt prompt](docs/prompts/UPDATE-AND-ADOPT-BACKUPS.md). A software-only update preserves existing CCC settings. See [alpha.9 compatibility](docs/RELEASE-v0.1.0-alpha.9.md).
